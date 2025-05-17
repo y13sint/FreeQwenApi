@@ -1,6 +1,6 @@
 // routes.js - Модуль с маршрутами для API
 import express from 'express';
-import { sendMessage, listModels } from './chat.js';
+import { sendMessage, getAllModels } from './chat.js';
 import { getAuthenticationStatus } from '../browser/browser.js';
 import { checkAuthentication } from '../browser/auth.js';
 import { getBrowserContext } from '../browser/browser.js';
@@ -28,17 +28,8 @@ router.post('/chat', async (req, res) => {
 // Эндпоинт для получения списка доступных моделей
 router.get('/models', async (req, res) => {
     try {
-        const browserContext = getBrowserContext();
-        if (!browserContext) {
-            return res.status(500).json({ error: 'Браузер не инициализирован' });
-        }
-
-        const models = await listModels(browserContext);
-        if (models) {
-            res.json(models);
-        } else {
-            res.status(404).json({ error: 'Не удалось получить список моделей' });
-        }
+        const models = getAllModels();
+        res.json(models);
     } catch (error) {
         console.error('Ошибка при получении списка моделей:', error);
         res.status(500).json({ error: 'Внутренняя ошибка сервера' });

@@ -6,6 +6,7 @@ import path from 'path';
 
 import { initBrowser, shutdownBrowser } from './src/browser/browser.js';
 import apiRoutes from './src/api/routes.js';
+import { getAvailableModelsFromFile } from './src/api/chat.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -52,9 +53,13 @@ async function startServer() {
             console.log(`API доступен по адресу: http://localhost:${port}/api`);
             console.log('Для проверки статуса авторизации: GET /api/status');
             console.log('Для отправки сообщения: POST /api/chat');
-            console.log('Формат JSON запроса: { "message": "текст сообщения", "model": "название модели (опционально, не рекомендуется изменять/добавлять)" }');
-            console.log('пример запроса: { "message": "Привет, как дела?" }');
+            console.log('Для получения списка моделей: GET /api/models');
+            console.log('Формат JSON запроса: { "message": "текст сообщения", "model": "название модели (опционально)" }');
+            console.log('Пример запроса: { "message": "Привет, как дела?" }');
             console.log('======================================================');
+
+            // Загружаем и выводим список доступных моделей при запуске
+            getAvailableModelsFromFile();
         });
     } catch (err) {
         if (err.code === 'EADDRINUSE') {
@@ -63,7 +68,7 @@ async function startServer() {
             await shutdownBrowser();
             process.exit(1);
         } else {
-            throw err; 
+            throw err;
         }
     }
 }
