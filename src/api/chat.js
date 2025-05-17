@@ -6,8 +6,10 @@ import { saveAuthToken, loadAuthToken } from '../browser/session.js';
 
 const CHAT_API_URL = 'https://chat.qwen.ai/api/chat/completions';
 const CHAT_PAGE_URL = 'https://chat.qwen.ai/';
+const MODELS_API_URL = 'https://chat.qwen.ai/api/models';
 
 let authToken = loadAuthToken();
+let availableModels = null;
 
 const pagePool = {
     pages: [],
@@ -83,11 +85,139 @@ export async function extractAuthToken(context) {
     }
 }
 
+//export async function getAvailableModels(context) {
+//    try {
+//        if (!authToken) {
+//            console.error('Токен отсутствует, невозможно запросить список моделей');
+//            return null;
+//         }
+
+//        const page = await context.newPage();
+
+//        try {
+//            console.log('Извлекаем список доступных моделей из интерфейса...');
+//
+//            // Переходим на главную страницу чата
+//            await page.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded' });
+//            await page.waitForTimeout(2000); // Даем время для загрузки страницы
+//
+//            // Пытаемся найти меню выбора моделей и открыть его
+//            const modelSelector = '.ant-select-selection-search, .model-selector';
+//
+//            // Проверяем наличие селектора моделей
+//            const hasSelectorElement = await page.locator(modelSelector).count() > 0;
+//            if (!hasSelectorElement) {
+//                console.log('Селектор моделей не найден, попробуем получить альтернативным способом...');
+
+//                // Альтернативный подход - извлечем доступные модели из страницы другим способом
+//                // Извлекаем все глобальные переменные и ищем в них упоминания о моделях
+//                const extractedModels = await page.evaluate(() => {
+//                    try {
+//                        // Просматриваем весь HTML страницы для поиска упоминаний моделей
+//                        const html = document.documentElement.innerHTML;
+
+//                        // Ищем характерные упоминания моделей
+//                        const modelMatches = html.match(/"model"\s*:\s*"([^"]+)"/g) || [];
+//                        const uniqueModels = new Set();
+//
+// Извлекаем имена моделей из совпадений
+//                        modelMatches.forEach(match => {
+//                            const modelName = match.match(/"model"\s*:\s*"([^"]+)"/)[1];
+//                            if (modelName && !modelName.includes('${') && modelName.startsWith('qwen')) {
+//                                uniqueModels.add(modelName);
+//                            }
+//                        });
+//
+//                        // Добавляем известные модели, если они не были найдены
+//                        const knownModels = ['qwen-max', 'qwen-max-latest', 'qwen-plus', 'qwen-turbo'];
+//                        knownModels.forEach(model => uniqueModels.add(model));
+
+//                       return Array.from(uniqueModels);
+//                    } catch (error) {
+//                        console.error('Ошибка при извлечении моделей:', error);
+//                        return null;
+//                    }
+//                  });
+
+//                if (extractedModels && extractedModels.length > 0) {
+//                    console.log('Найдены модели альтернативным способом:', extractedModels);
+
+//                    // Формируем результат в формате, который ожидает API
+//                    const result = {
+//                        models: extractedModels.map(model => ({
+//                            id: model,
+//                            name: model,
+//                            description: `Модель ${model}`
+//                        }))
+//                    };
+
+//                    availableModels = result;
+//                    return result;
+//                }
+
+//                return {
+//                    models: [
+//                        { id: 'qwen-max-latest', name: 'Qwen Max (latest)', description: 'Рекомендуемая модель (по умолчанию)' },
+//                        { id: 'qwen-max', name: 'Qwen Max', description: 'Модель Qwen Max' },
+//                        { id: 'qwen-plus', name: 'Qwen Plus', description: 'Модель Qwen Plus' },
+//                        { id: 'qwen-turbo', name: 'Qwen Turbo', description: 'Быстрая модель Qwen Turbo' }
+//                    ]
+//                };
+//            }
+
+//            // Нажимаем на селектор моделей, чтобы открыть выпадающий список
+//            await page.click(modelSelector);
+//            await page.waitForTimeout(1000);
+
+// Извлекаем список моделей из выпадающего списка
+//            const modelItems = await page.locator('.ant-select-item, .model-option').all();
+
+//            const models = [];
+//            for (const item of modelItems) {
+//                const modelText = await item.textContent();
+//                const modelId = await item.getAttribute('title') || modelText;
+
+//                models.push({
+//                    id: modelId.toLowerCase().trim(),
+//                    name: modelText.trim(),
+//                    description: `Модель ${modelText.trim()}`
+//                });
+//            }
+
+//            console.log('Получен список доступных моделей из UI:', models);
+
+//            const result = { models };
+//            availableModels = result;
+//            return result;
+//        } finally {
+//            await page.close();
+//        }
+//    } catch (error) {
+//        console.error('Ошибка при запросе списка моделей:', error);
+//        // Возвращаем фиксированный список моделей в случае ошибки
+//        return {
+//            models: [
+//                { id: 'qwen-max-latest', name: 'Qwen Max (latest)', description: 'Рекомендуемая модель (по умолчанию)' },
+//                { id: 'qwen-max', name: 'Qwen Max', description: 'Модель Qwen Max' },
+//                { id: 'qwen-plus', name: 'Qwen Plus', description: 'Модель Qwen Plus' },
+//                { id: 'qwen-turbo', name: 'Qwen Turbo', description: 'Быстрая модель Qwen Turbo' }
+//            ]
+//        };
+//    }
+//  }
+
 export async function sendMessage(message, model = "qwen-max-latest") {
+
+    model = (!model || model.trim() === "") ? "qwen-max-latest" : model;
+
     const browserContext = getBrowserContext();
     if (!browserContext) {
         return { error: 'Браузер не инициализирован' };
     }
+
+    // if (!availableModels) {
+    //     await getAvailableModels(browserContext);
+    // }
 
     if (!getAuthenticationStatus()) {
         const authCheck = await checkAuthentication(browserContext);
@@ -134,6 +264,8 @@ export async function sendMessage(message, model = "qwen-max-latest") {
             stream: false
         };
 
+        console.log(`Отправляемый запрос: ${JSON.stringify(payload)}`);
+
         const evalData = {
             apiUrl: CHAT_API_URL,
             payload: payload,
@@ -167,7 +299,13 @@ export async function sendMessage(message, model = "qwen-max-latest") {
                         return { success: false, error: 'Не удалось распарсить ответ как JSON', html: resultText };
                     }
                 } else {
-                    return { success: false, status: response.status, statusText: response.statusText };
+                    const errorBody = await response.text();
+                    return {
+                        success: false,
+                        status: response.status,
+                        statusText: response.statusText,
+                        errorBody: errorBody
+                    };
                 }
             } catch (error) {
                 return { success: false, error: error.toString() };
@@ -183,13 +321,16 @@ export async function sendMessage(message, model = "qwen-max-latest") {
         } else {
             console.error('Ошибка при получении ответа:', response.error || response.statusText);
 
+            if (response.errorBody) {
+                console.error('Тело ответа с ошибкой:', response.errorBody);
+            }
+
             if (response.html && response.html.includes('Verification')) {
                 setAuthenticationStatus(false);
                 console.log('Обнаружена необходимость верификации, перезапуск браузера в видимом режиме...');
 
                 await pagePool.clear();
 
-                // Сбрасываем токен
                 authToken = null;
 
                 await shutdownBrowser();
@@ -198,7 +339,7 @@ export async function sendMessage(message, model = "qwen-max-latest") {
                 return { error: 'Требуется верификация. Браузер запущен в видимом режиме.', verification: true };
             }
 
-            return { error: response.error || response.statusText };
+            return { error: response.error || response.statusText, details: response.errorBody || 'Нет дополнительных деталей' };
         }
     } catch (error) {
         console.error('Ошибка при отправке сообщения:', error);
@@ -221,4 +362,8 @@ export async function clearPagePool() {
 
 export function getAuthToken() {
     return authToken;
+}
+
+export async function listModels(browserContext) {
+    return await getAvailableModels(browserContext);
 } 
