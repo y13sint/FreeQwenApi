@@ -52,6 +52,7 @@ async function startServer() {
             console.log(`API доступен по адресу: http://localhost:${port}/api`);
             console.log('Для проверки статуса авторизации: GET /api/status');
             console.log('Для отправки сообщения: POST /api/chat');
+            console.log('Формат JSON запроса: { "message": "текст сообщения"}');
         });
     } catch (err) {
         if (err.code === 'EADDRINUSE') {
@@ -60,7 +61,7 @@ async function startServer() {
             await shutdownBrowser();
             process.exit(1);
         } else {
-            throw err; 
+            throw err;
         }
     }
 }
