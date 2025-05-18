@@ -18,7 +18,6 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = 3264;
 
-// Создаем интерфейс readline для взаимодействия с пользователем
 const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
@@ -44,7 +43,6 @@ async function handleShutdown() {
     await shutdownBrowser();
     console.log('Завершение работы.');
 
-    // Закрываем readline интерфейс, если он открыт
     if (rl) {
         rl.close();
     }
@@ -52,7 +50,6 @@ async function handleShutdown() {
     process.exit(0);
 }
 
-// Функция для запроса режима запуска у пользователя
 function promptLaunchMode() {
     return new Promise((resolve) => {
         if (hasSession()) {
@@ -70,12 +67,10 @@ function promptLaunchMode() {
                     console.log('\nЗапуск сервера с новой авторизацией...\n');
                 }
 
-                // Для initBrowser: true - видимый режим (ручная авторизация), false - невидимый (использовать сессию)
                 resolve(!useSavedSession);
             });
         } else {
             console.log('\nСохраненная сессия не найдена, выполняется запуск с новой авторизацией...\n');
-            // Если сессии нет, запускаем в видимом режиме (для ручной авторизации)
             resolve(true);
         }
     });
@@ -84,13 +79,10 @@ function promptLaunchMode() {
 async function startServer() {
     console.log('Запуск сервера...');
 
-    // Инициализируем директорию для истории чатов
     initHistoryDirectory();
 
-    // Запрашиваем режим запуска
     const visibleMode = await promptLaunchMode();
 
-    // Закрываем readline интерфейс после выбора
     rl.close();
 
     const browserInitialized = await initBrowser(visibleMode);
@@ -119,7 +111,6 @@ async function startServer() {
             console.log('Пример запроса с сохранением контекста: { "message": "Привет, как дела?", "chatId": "полученный_id_чата" }');
             console.log('======================================================');
 
-            // Загружаем и выводим список доступных моделей при запуске
             getAvailableModelsFromFile();
         });
     } catch (err) {
@@ -138,7 +129,6 @@ startServer().catch(async error => {
     console.error('Ошибка при запуске сервера:', error);
     await shutdownBrowser();
 
-    // Закрываем readline интерфейс в случае ошибки
     if (rl) {
         rl.close();
     }

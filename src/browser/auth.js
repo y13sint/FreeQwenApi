@@ -8,13 +8,10 @@ const AUTH_SIGNIN_URL = 'https://chat.qwen.ai/auth?action=signin';
 
 const VERIFICATION_TIMEOUT = 300000;
 
-// Вместо создания своего интерфейса readline, используем функцию для ожидания ввода
 async function promptUser(question) {
     return new Promise(resolve => {
-        // Используем стандартный ввод/вывод напрямую
         process.stdout.write(question);
 
-        // Обработчик для однократного чтения ввода
         const onData = (data) => {
             const input = data.toString().trim();
             process.stdin.removeListener('data', onData);
@@ -22,7 +19,6 @@ async function promptUser(question) {
             resolve(input);
         };
 
-        // Добавляем временный обработчик
         process.stdin.resume();
         process.stdin.once('data', onData);
     });
@@ -30,7 +26,6 @@ async function promptUser(question) {
 
 export async function checkAuthentication(context) {
     try {
-        // Если статус авторизации уже установлен как true, просто возвращаем его
         if (getAuthenticationStatus()) {
             return true;
         }
@@ -60,10 +55,8 @@ export async function checkAuthentication(context) {
             console.log('               АВТОРИЗАЦИЯ ОБНАРУЖЕНА                 ');
             console.log('======================================================');
 
-            // Устанавливаем статус авторизации без запроса подтверждения
             setAuthenticationStatus(true);
 
-            // Извлекаем токен и сохраняем сессию
             await extractAuthToken(context);
             await saveSession(context);
 
@@ -71,7 +64,6 @@ export async function checkAuthentication(context) {
 
             await page.close();
 
-            // Перезапускаем браузер в фоновом режиме
             await restartBrowserInHeadlessMode();
 
             return true;
@@ -143,7 +135,7 @@ export async function startManualAuthentication(context) {
         console.log('------------------------------------------------------');
 
         await promptUser('После успешной авторизации нажмите ENTER для продолжения...');
-        console.log('Пользователь подтвердил завершение авторизации.');
+        console.log('Пользователь подтвердил завершение авторизации. Подождите...');
 
         await page.goto(AUTH_URL);
         await page.waitForLoadState('domcontentloaded');
