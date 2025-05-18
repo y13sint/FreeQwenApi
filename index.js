@@ -7,6 +7,7 @@ import path from 'path';
 import { initBrowser, shutdownBrowser } from './src/browser/browser.js';
 import apiRoutes from './src/api/routes.js';
 import { getAvailableModelsFromFile } from './src/api/chat.js';
+import { initHistoryDirectory } from './src/api/chatHistory.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -41,6 +42,9 @@ async function handleShutdown() {
 async function startServer() {
     console.log('Запуск сервера...');
 
+    // Инициализируем директорию для истории чатов
+    initHistoryDirectory();
+
     const browserInitialized = await initBrowser();
     if (!browserInitialized) {
         console.error('Не удалось инициализировать браузер. Завершение работы.');
@@ -54,8 +58,17 @@ async function startServer() {
             console.log('Для проверки статуса авторизации: GET /api/status');
             console.log('Для отправки сообщения: POST /api/chat');
             console.log('Для получения списка моделей: GET /api/models');
-            console.log('Формат JSON запроса: { "message": "текст сообщения", "model": "название модели (опционально)" }');
+            console.log('======================================================');
+            console.log('Управление чатами:');
+            console.log('Создать новый чат: POST /api/chats');
+            console.log('Получить список чатов: GET /api/chats');
+            console.log('Получить историю чата: GET /api/chats/:chatId');
+            console.log('Удалить чат: DELETE /api/chats/:chatId');
+            console.log('======================================================');
+            console.log('Формат JSON запроса на чат:');
+            console.log('{ "message": "текст сообщения", "model": "название модели (опционально)", "chatId": "ID чата (опционально)" }');
             console.log('Пример запроса: { "message": "Привет, как дела?" }');
+            console.log('Пример запроса с сохранением контекста: { "message": "Привет, как дела?", "chatId": "полученный_id_чата" }');
             console.log('======================================================');
 
             // Загружаем и выводим список доступных моделей при запуске

@@ -4,20 +4,24 @@ import { sendMessage, getAllModels } from './chat.js';
 import { getAuthenticationStatus } from '../browser/browser.js';
 import { checkAuthentication } from '../browser/auth.js';
 import { getBrowserContext } from '../browser/browser.js';
+import { getAllChats, loadHistory, createChat, deleteChat, chatExists } from './chatHistory.js';
 
 const router = express.Router();
 
 router.post('/chat', async (req, res) => {
     try {
-        const { message, model } = req.body;
+        const { message, model, chatId } = req.body;
 
         if (!message) {
             return res.status(400).json({ error: 'Сообщение не указано' });
         }
 
         console.log(`Получен запрос: ${message}`);
+        if (chatId) {
+            console.log(`Используется chatId: ${chatId}`);
+        }
 
-        const result = await sendMessage(message, model);
+        const result = await sendMessage(message, model, chatId);
         res.json(result);
     } catch (error) {
         console.error('Ошибка при обработке запроса:', error);
@@ -53,6 +57,64 @@ router.get('/status', async (req, res) => {
         });
     } catch (error) {
         console.error('Ошибка при проверке статуса:', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// Новые маршруты для работы с чатами
+
+// Создать новый чат
+router.post('/chats', (req, res) => {
+    try {
+        const chatId = createChat();
+        res.json({ chatId });
+    } catch (error) {
+        console.error('Ошибка при создании чата:', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// Получить список всех чатов
+router.get('/chats', (req, res) => {
+    try {
+        const chats = getAllChats();
+        res.json({ chats });
+    } catch (error) {
+        console.error('Ошибка при получении списка чатов:', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// Получить историю конкретного чата
+router.get('/chats/:chatId', (req, res) => {
+    try {
+        const { chatId } = req.params;
+
+        if (!chatId || !chatExists(chatId)) {
+            return res.status(404).json({ error: 'Чат не найден' });
+        }
+
+        const history = loadHistory(chatId);
+        res.json({ chatId, history });
+    } catch (error) {
+        console.error('Ошибка при получении истории чата:', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// Удалить чат
+router.delete('/chats/:chatId', (req, res) => {
+    try {
+        const { chatId } = req.params;
+
+        if (!chatId || !chatExists(chatId)) {
+            return res.status(404).json({ error: 'Чат не найден' });
+        }
+
+        const success = deleteChat(chatId);
+        res.json({ success });
+    } catch (error) {
+        console.error('Ошибка при удалении чата:', error);
         res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });

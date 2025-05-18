@@ -3,6 +3,7 @@ import { checkAuthentication } from '../browser/auth.js';
 import { checkVerification } from '../browser/auth.js';
 import { shutdownBrowser, initBrowser } from '../browser/browser.js';
 import { saveAuthToken, loadAuthToken } from '../browser/session.js';
+import { loadHistory, addUserMessage, addAssistantMessage, createChat, chatExists } from './chatHistory.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -13,7 +14,6 @@ const __dirname = path.dirname(__filename);
 
 const CHAT_API_URL = 'https://chat.qwen.ai/api/chat/completions';
 const CHAT_PAGE_URL = 'https://chat.qwen.ai/';
-const MODELS_API_URL = 'https://chat.qwen.ai/api/models';
 
 // Путь к файлу со списком доступных моделей
 const MODELS_FILE = path.join(__dirname, '..', 'AvaibleModels.txt');
@@ -100,13 +100,13 @@ export function getAvailableModelsFromFile() {
     try {
         if (!fs.existsSync(MODELS_FILE)) {
             console.error(`Файл с моделями не найден: ${MODELS_FILE}`);
-            return ['qwen-max-latest']; 
+            return ['qwen-max-latest'];
         }
 
         const fileContent = fs.readFileSync(MODELS_FILE, 'utf8');
         const models = fileContent.split('\n')
             .map(line => line.trim())
-            .filter(line => line && !line.startsWith('#')); 
+            .filter(line => line && !line.startsWith('#'));
 
         console.log('===== ДОСТУПНЫЕ МОДЕЛИ =====');
         models.forEach(model => console.log(`- ${model}`));
@@ -115,7 +115,7 @@ export function getAvailableModelsFromFile() {
         return models;
     } catch (error) {
         console.error('Ошибка при чтении файла с моделями:', error);
-        return ['qwen-max-latest']; 
+        return ['qwen-max-latest'];
     }
 }
 
@@ -144,19 +144,27 @@ export function getAllModels() {
     };
 }
 
-export async function sendMessage(message, model = "qwen-max-latest") {
+export async function sendMessage(message, model = "qwen-max-latest", chatId = null) {
 
     if (!availableModels) {
         availableModels = getAvailableModelsFromFile();
     }
 
+    // Если chatId не передан или не существует, создаем новый чат
+    if (!chatId || !chatExists(chatId)) {
+        chatId = createChat();
+        console.log(`Создан новый чат с ID: ${chatId}`);
+    }
+
+    // Добавляем сообщение пользователя в историю
+    addUserMessage(chatId, message);
 
     if (!model || model.trim() === "") {
         model = "qwen-max-latest";
     } else {
         if (!isValidModel(model)) {
             console.warn(`Предупреждение: Указанная модель "${model}" не найдена в списке доступных моделей. Используется модель по умолчанию.`);
-            model = "qwen-max-latest"; 
+            model = "qwen-max-latest";
         }
     }
 
@@ -164,13 +172,13 @@ export async function sendMessage(message, model = "qwen-max-latest") {
 
     const browserContext = getBrowserContext();
     if (!browserContext) {
-        return { error: 'Браузер не инициализирован' };
+        return { error: 'Браузер не инициализирован', chatId };
     }
 
     if (!getAuthenticationStatus()) {
         const authCheck = await checkAuthentication(browserContext);
         if (!authCheck) {
-            return { error: 'Требуется авторизация. Пожалуйста, авторизуйтесь в открытом браузере.' };
+            return { error: 'Требуется авторизация. Пожалуйста, авторизуйтесь в открытом браузере.', chatId };
         }
     }
 
@@ -178,7 +186,7 @@ export async function sendMessage(message, model = "qwen-max-latest") {
         authToken = await extractAuthToken(browserContext);
         if (!authToken) {
             console.error('Не удалось получить токен авторизации');
-            return { error: 'Ошибка авторизации: не удалось получить токен' };
+            return { error: 'Ошибка авторизации: не удалось получить токен', chatId };
         }
     }
 
@@ -195,7 +203,7 @@ export async function sendMessage(message, model = "qwen-max-latest") {
             console.error('Токен отсутствует перед отправкой запроса');
             authToken = await page.evaluate(() => localStorage.getItem('token'));
             if (!authToken) {
-                return { error: 'Токен авторизации не найден. Требуется перезапуск в ручном режиме.' };
+                return { error: 'Токен авторизации не найден. Требуется перезапуск в ручном режиме.', chatId };
             } else {
                 saveAuthToken(authToken);
             }
@@ -203,23 +211,30 @@ export async function sendMessage(message, model = "qwen-max-latest") {
 
         console.log('Отправка запроса к API...');
 
+        // Загружаем историю сообщений
+        const history = loadHistory(chatId);
+
+        // Формируем массив сообщений для API в формате Qwen
+        const messages = history.map(msg => ({
+            role: msg.role,
+            content: msg.content,
+            chat_type: "t2t"
+        }));
+
         const payload = {
             chat_type: "t2t",
-            messages: [
-                { role: "user", content: message, extra: {}, chat_type: "t2t" },
-            ],
+            messages: messages,
             model: model,
             stream: false
         };
 
-        console.log(`Отправляемый запрос: ${JSON.stringify(payload)}`);
+        console.log(`Отправляемый запрос с историей из ${messages.length} сообщений`);
 
         const evalData = {
             apiUrl: CHAT_API_URL,
             payload: payload,
             token: authToken
         };
-
 
         console.log(`Используем токен: ${authToken ? 'Токен существует' : 'Токен отсутствует'}`);
 
@@ -265,6 +280,16 @@ export async function sendMessage(message, model = "qwen-max-latest") {
 
         if (response.success) {
             console.log('Ответ получен успешно');
+
+            // Добавляем ответ ассистента в историю
+            const assistantContent = response.data.choices && response.data.choices[0]?.message?.content || '';
+            const responseInfo = response.data.usage || {};
+
+            addAssistantMessage(chatId, assistantContent, responseInfo);
+
+            // Добавляем chatId в ответ
+            response.data.chatId = chatId;
+
             return response.data;
         } else {
             console.error('Ошибка при получении ответа:', response.error || response.statusText);
@@ -284,14 +309,14 @@ export async function sendMessage(message, model = "qwen-max-latest") {
                 await shutdownBrowser();
                 await initBrowser(true);
 
-                return { error: 'Требуется верификация. Браузер запущен в видимом режиме.', verification: true };
+                return { error: 'Требуется верификация. Браузер запущен в видимом режиме.', verification: true, chatId };
             }
 
-            return { error: response.error || response.statusText, details: response.errorBody || 'Нет дополнительных деталей' };
+            return { error: response.error || response.statusText, details: response.errorBody || 'Нет дополнительных деталей', chatId };
         }
     } catch (error) {
         console.error('Ошибка при отправке сообщения:', error);
-        return { error: error.toString() };
+        return { error: error.toString(), chatId };
     } finally {
 
         if (page) {
