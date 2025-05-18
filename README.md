@@ -33,7 +33,7 @@ npm start
 ### Отправка сообщений
 
 ```
-POST http://localhost:3000/api/chat
+POST http://localhost:3264/api/chat
 ```
 
 Тело запроса:
@@ -51,13 +51,13 @@ POST http://localhost:3000/api/chat
 ### Получение списка моделей
 
 ```
-GET http://localhost:3000/api/models
+GET http://localhost:3264/api/models
 ```
 
 ### Проверка статуса авторизации
 
 ```
-GET http://localhost:3000/api/status
+GET http://localhost:3264/api/status
 ```
 
 ## Управление диалогами
@@ -65,7 +65,7 @@ GET http://localhost:3000/api/status
 ### Создание нового диалога
 
 ```
-POST http://localhost:3000/api/chats
+POST http://localhost:3264/api/chats
 ```
 
 Возвращает:
@@ -79,19 +79,19 @@ POST http://localhost:3000/api/chats
 ### Получение списка всех диалогов
 
 ```
-GET http://localhost:3000/api/chats
+GET http://localhost:3264/api/chats
 ```
 
 ### Получение истории диалога
 
 ```
-GET http://localhost:3000/api/chats/:chatId
+GET http://localhost:3264/api/chats/:chatId
 ```
 
 ### Удаление диалога
 
 ```
-DELETE http://localhost:3000/api/chats/:chatId
+DELETE http://localhost:3264/api/chats/:chatId
 ```
 
 ## Работа с контекстом
@@ -131,4 +131,3 @@ DELETE http://localhost:3000/api/chats/:chatId
   "chatId": "abcd-1234-5678"
 }
 ```
-
