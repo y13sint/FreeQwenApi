@@ -46,9 +46,14 @@ router.get('/status', async (req, res) => {
             return res.json({ authenticated: false, message: 'Браузер не инициализирован' });
         }
 
-        if (!getAuthenticationStatus()) {
-            await checkAuthentication(browserContext);
+        if (getAuthenticationStatus()) {
+            return res.json({
+                authenticated: true,
+                message: 'Авторизация активна (используется сохраненная сессия)'
+            });
         }
+
+        await checkAuthentication(browserContext);
 
         res.json({
             authenticated: getAuthenticationStatus(),

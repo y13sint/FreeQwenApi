@@ -30,8 +30,10 @@ if %ERRORLEVEL% neq 0 (
 )
 
 echo.
-echo Запуск сервера...
+echo Запуск приложения...
 echo.
+
+:: Запуск Node.js приложения
 node index.js
 
 pause 

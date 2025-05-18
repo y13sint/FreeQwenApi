@@ -171,6 +171,7 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
     }
 
     if (!getAuthenticationStatus()) {
+        console.log('Проверка авторизации...');
         const authCheck = await checkAuthentication(browserContext);
         if (!authCheck) {
             return { error: 'Требуется авторизация. Пожалуйста, авторизуйтесь в открытом браузере.', chatId };
@@ -178,6 +179,7 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
     }
 
     if (!authToken) {
+        console.log('Получение токена авторизации...');
         authToken = await extractAuthToken(browserContext);
         if (!authToken) {
             console.error('Не удалось получить токен авторизации');

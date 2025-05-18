@@ -2,12 +2,14 @@ import express from 'express';
 import bodyParser from 'body-parser';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import readline from 'readline';
 
 
 import { initBrowser, shutdownBrowser } from './src/browser/browser.js';
 import apiRoutes from './src/api/routes.js';
 import { getAvailableModelsFromFile } from './src/api/chat.js';
 import { initHistoryDirectory } from './src/api/chatHistory.js';
+import { hasSession } from './src/browser/session.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -16,6 +18,11 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = 3264;
 
+// Создаем интерфейс readline для взаимодействия с пользователем
+const rl = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+});
 
 app.use(bodyParser.json());
 
@@ -36,7 +43,42 @@ async function handleShutdown() {
     console.log('\nПолучен сигнал завершения. Закрываем браузер...');
     await shutdownBrowser();
     console.log('Завершение работы.');
+
+    // Закрываем readline интерфейс, если он открыт
+    if (rl) {
+        rl.close();
+    }
+
     process.exit(0);
+}
+
+// Функция для запроса режима запуска у пользователя
+function promptLaunchMode() {
+    return new Promise((resolve) => {
+        if (hasSession()) {
+            console.log('\n[НАЙДЕНА СОХРАНЕННАЯ СЕССИЯ]');
+            console.log('\nВыберите режим запуска:');
+            console.log('1 - Использовать сохраненную сессию (без повторной авторизации)');
+            console.log('2 - Запустить с новой авторизацией');
+
+            rl.question('\nВаш выбор (1/2, по умолчанию 1): ', (answer) => {
+                const useSavedSession = answer !== '2';
+
+                if (useSavedSession) {
+                    console.log('\nЗапуск сервера с сохраненной сессией...\n');
+                } else {
+                    console.log('\nЗапуск сервера с новой авторизацией...\n');
+                }
+
+                // Для initBrowser: true - видимый режим (ручная авторизация), false - невидимый (использовать сессию)
+                resolve(!useSavedSession);
+            });
+        } else {
+            console.log('\nСохраненная сессия не найдена, выполняется запуск с новой авторизацией...\n');
+            // Если сессии нет, запускаем в видимом режиме (для ручной авторизации)
+            resolve(true);
+        }
+    });
 }
 
 async function startServer() {
@@ -45,7 +87,13 @@ async function startServer() {
     // Инициализируем директорию для истории чатов
     initHistoryDirectory();
 
-    const browserInitialized = await initBrowser();
+    // Запрашиваем режим запуска
+    const visibleMode = await promptLaunchMode();
+
+    // Закрываем readline интерфейс после выбора
+    rl.close();
+
+    const browserInitialized = await initBrowser(visibleMode);
     if (!browserInitialized) {
         console.error('Не удалось инициализировать браузер. Завершение работы.');
         process.exit(1);
@@ -89,5 +137,11 @@ async function startServer() {
 startServer().catch(async error => {
     console.error('Ошибка при запуске сервера:', error);
     await shutdownBrowser();
+
+    // Закрываем readline интерфейс в случае ошибки
+    if (rl) {
+        rl.close();
+    }
+
     process.exit(1);
 });

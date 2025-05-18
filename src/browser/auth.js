@@ -2,28 +2,39 @@
 import { saveSession } from './session.js';
 import { setAuthenticationStatus, getAuthenticationStatus, restartBrowserInHeadlessMode } from './browser.js';
 import { extractAuthToken } from '../api/chat.js';
-import readline from 'readline';
 
 const AUTH_URL = 'https://chat.qwen.ai/';
 const AUTH_SIGNIN_URL = 'https://chat.qwen.ai/auth?action=signin';
 
 const VERIFICATION_TIMEOUT = 300000;
 
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
+// Вместо создания своего интерфейса readline, используем функцию для ожидания ввода
+async function promptUser(question) {
+    return new Promise(resolve => {
+        // Используем стандартный ввод/вывод напрямую
+        process.stdout.write(question);
 
-function promptUser(question) {
-    return new Promise((resolve) => {
-        rl.question(question, (answer) => {
-            resolve(answer);
-        });
+        // Обработчик для однократного чтения ввода
+        const onData = (data) => {
+            const input = data.toString().trim();
+            process.stdin.removeListener('data', onData);
+            process.stdin.pause();
+            resolve(input);
+        };
+
+        // Добавляем временный обработчик
+        process.stdin.resume();
+        process.stdin.once('data', onData);
     });
 }
 
 export async function checkAuthentication(context) {
     try {
+        // Если статус авторизации уже установлен как true, просто возвращаем его
+        if (getAuthenticationStatus()) {
+            return true;
+        }
+
         const page = await context.newPage();
 
         console.log('Проверка авторизации...');
@@ -48,29 +59,21 @@ export async function checkAuthentication(context) {
             console.log('======================================================');
             console.log('               АВТОРИЗАЦИЯ ОБНАРУЖЕНА                 ');
             console.log('======================================================');
-            console.log('Для подтверждения авторизации нажмите ENTER или введите "да"...');
 
-            const confirmation = await promptUser('-> ');
-            console.log('Пользователь подтвердил авторизацию.');
-
+            // Устанавливаем статус авторизации без запроса подтверждения
             setAuthenticationStatus(true);
 
+            // Извлекаем токен и сохраняем сессию
+            await extractAuthToken(context);
             await saveSession(context);
 
-            await extractAuthToken(context);
-
             console.log('Сессия сохранена успешно!');
-            console.log('Теперь вы можете использовать API через локальный прокси.');
-            console.log('Примеры вызова API:');
-            console.log('1. Через Python-клиент:   python qwen_client.py');
-            console.log('2. Через JavaScript:      npm run client');
-            console.log('3. Через HTTP-запрос:     curl -X POST http://localhost:3000/api/chat \\');
-            console.log('                          -H "Content-Type: application/json" \\');
-            console.log('                          -d "{\\"message\\":\\"Привет, как дела?\\"}"');
-            console.log('======================================================');
 
             await page.close();
+
+            // Перезапускаем браузер в фоновом режиме
             await restartBrowserInHeadlessMode();
+
             return true;
         } else {
             console.log('------------------------------------------------------');
@@ -96,7 +99,6 @@ export async function checkAuthentication(context) {
                 setAuthenticationStatus(true);
 
                 await saveSession(context);
-
                 await extractAuthToken(context);
 
                 console.log('Сессия сохранена успешно!');
@@ -117,9 +119,6 @@ export async function checkAuthentication(context) {
                 return false;
             }
         }
-
-        await page.close();
-        return getAuthenticationStatus();
     } catch (error) {
         console.error('Ошибка при проверке авторизации:', error);
         setAuthenticationStatus(false);

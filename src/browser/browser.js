@@ -13,8 +13,8 @@ export async function initBrowser(visibleMode = true) {
         console.log('Инициализация браузера...');
         try {
             browserInstance = await chromium.launch({
-                headless: !visibleMode,  
-                slowMo: visibleMode ? 50 : 0,  
+                headless: !visibleMode,
+                slowMo: visibleMode ? 50 : 0,
             });
 
             browserContext = await browserInstance.newContext({
@@ -28,7 +28,13 @@ export async function initBrowser(visibleMode = true) {
             if (visibleMode) {
                 await startManualAuthentication(browserContext);
             } else {
-                await loadSession(browserContext);
+                const sessionLoaded = await loadSession(browserContext);
+                if (sessionLoaded) {
+                    setAuthenticationStatus(true);
+                    console.log('Сессия успешно загружена, статус авторизации установлен');
+                } else {
+                    console.warn('Не удалось загрузить сохраненную сессию');
+                }
             }
 
             return true;
@@ -68,28 +74,32 @@ export async function restartBrowserInHeadlessMode() {
 
 export async function shutdownBrowser() {
     try {
+        // Сначала очищаем пул страниц
         try {
             await clearPagePool();
         } catch (e) {
             console.error('Ошибка при очистке пула страниц:', e);
         }
 
+        // Закрываем контекст браузера
         if (browserContext) {
             try {
-                await browserContext.close();
+                await browserContext.close().catch(() => { });
             } catch (e) {
-                console.error('Ошибка при закрытии контекста браузера:', e);
+                // Игнорируем ошибку, если контекст уже закрыт
             }
         }
 
+        // Закрываем браузер
         if (browserInstance) {
             try {
-                await browserInstance.close();
+                await browserInstance.close().catch(() => { });
             } catch (e) {
-                console.error('Ошибка при закрытии браузера:', e);
+                // Игнорируем ошибку, если браузер уже закрыт
             }
         }
 
+        // Сбрасываем переменные
         browserContext = null;
         browserInstance = null;
 
