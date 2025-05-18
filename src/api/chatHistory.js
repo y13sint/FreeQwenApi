@@ -17,24 +17,20 @@ export function initHistoryDirectory() {
     }
 }
 
-// Генерация уникального ID для чата
 export function generateChatId() {
     return crypto.randomUUID();
 }
 
-// Создание нового чата
 export function createChat() {
     const chatId = generateChatId();
     saveHistory(chatId, []);
     return chatId;
 }
 
-// Получение пути к файлу истории чата
 function getHistoryFilePath(chatId) {
     return path.join(HISTORY_DIR, `${chatId}.json`);
 }
 
-// Сохранение истории чата
 export function saveHistory(chatId, messages) {
     try {
         initHistoryDirectory();
@@ -47,7 +43,6 @@ export function saveHistory(chatId, messages) {
     }
 }
 
-// Загрузка истории чата
 export function loadHistory(chatId) {
     try {
         const historyFilePath = getHistoryFilePath(chatId);
@@ -61,13 +56,11 @@ export function loadHistory(chatId) {
     return [];
 }
 
-// Проверка существования чата
 export function chatExists(chatId) {
     const historyFilePath = getHistoryFilePath(chatId);
     return fs.existsSync(historyFilePath);
 }
 
-// Добавление сообщения пользователя в историю
 export function addUserMessage(chatId, content) {
     const timestamp = Math.floor(Date.now() / 1000);
     const messageId = crypto.randomUUID();
@@ -83,7 +76,6 @@ export function addUserMessage(chatId, content) {
     return addMessageToHistory(chatId, message);
 }
 
-// Добавление ответа ассистента в историю
 export function addAssistantMessage(chatId, content, info = {}) {
     const timestamp = Math.floor(Date.now() / 1000);
     const messageId = crypto.randomUUID();
@@ -100,14 +92,11 @@ export function addAssistantMessage(chatId, content, info = {}) {
     return addMessageToHistory(chatId, message);
 }
 
-// Общая функция добавления сообщения в историю
 function addMessageToHistory(chatId, message) {
     try {
         let history = loadHistory(chatId);
 
-        // Ограничение размера истории
         if (history.length >= MAX_HISTORY_LENGTH) {
-            // Удаляем самые старые сообщения, но сохраняем как минимум первое сообщение
             history = [history[0], ...history.slice(history.length - MAX_HISTORY_LENGTH + 2)];
         }
 
@@ -121,7 +110,6 @@ function addMessageToHistory(chatId, message) {
     }
 }
 
-// Получение всех чатов (ID)
 export function getAllChats() {
     try {
         initHistoryDirectory();
@@ -135,7 +123,6 @@ export function getAllChats() {
     }
 }
 
-// Удаление чата
 export function deleteChat(chatId) {
     try {
         const historyFilePath = getHistoryFilePath(chatId);

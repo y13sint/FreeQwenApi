@@ -29,7 +29,6 @@ router.post('/chat', async (req, res) => {
     }
 });
 
-// Эндпоинт для получения списка доступных моделей
 router.get('/models', async (req, res) => {
     try {
         const models = getAllModels();
@@ -61,9 +60,7 @@ router.get('/status', async (req, res) => {
     }
 });
 
-// Новые маршруты для работы с чатами
 
-// Создать новый чат
 router.post('/chats', (req, res) => {
     try {
         const chatId = createChat();
@@ -74,7 +71,6 @@ router.post('/chats', (req, res) => {
     }
 });
 
-// Получить список всех чатов
 router.get('/chats', (req, res) => {
     try {
         const chats = getAllChats();
@@ -85,7 +81,6 @@ router.get('/chats', (req, res) => {
     }
 });
 
-// Получить историю конкретного чата
 router.get('/chats/:chatId', (req, res) => {
     try {
         const { chatId } = req.params;
@@ -102,7 +97,6 @@ router.get('/chats/:chatId', (req, res) => {
     }
 });
 
-// Удалить чат
 router.delete('/chats/:chatId', (req, res) => {
     try {
         const { chatId } = req.params;

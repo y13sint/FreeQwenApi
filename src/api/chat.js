@@ -8,14 +8,12 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
-// Получаем путь к текущему файлу и директории для ES модулей
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const CHAT_API_URL = 'https://chat.qwen.ai/api/chat/completions';
 const CHAT_PAGE_URL = 'https://chat.qwen.ai/';
 
-// Путь к файлу со списком доступных моделей
 const MODELS_FILE = path.join(__dirname, '..', 'AvaibleModels.txt');
 
 let authToken = loadAuthToken();
@@ -95,7 +93,6 @@ export async function extractAuthToken(context) {
     }
 }
 
-// Загрузка доступных моделей из файла
 export function getAvailableModelsFromFile() {
     try {
         if (!fs.existsSync(MODELS_FILE)) {
@@ -150,13 +147,11 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
         availableModels = getAvailableModelsFromFile();
     }
 
-    // Если chatId не передан или не существует, создаем новый чат
     if (!chatId || !chatExists(chatId)) {
         chatId = createChat();
         console.log(`Создан новый чат с ID: ${chatId}`);
     }
 
-    // Добавляем сообщение пользователя в историю
     addUserMessage(chatId, message);
 
     if (!model || model.trim() === "") {
@@ -211,10 +206,8 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
 
         console.log('Отправка запроса к API...');
 
-        // Загружаем историю сообщений
         const history = loadHistory(chatId);
 
-        // Формируем массив сообщений для API в формате Qwen
         const messages = history.map(msg => ({
             role: msg.role,
             content: msg.content,
@@ -281,13 +274,11 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
         if (response.success) {
             console.log('Ответ получен успешно');
 
-            // Добавляем ответ ассистента в историю
             const assistantContent = response.data.choices && response.data.choices[0]?.message?.content || '';
             const responseInfo = response.data.usage || {};
 
             addAssistantMessage(chatId, assistantContent, responseInfo);
 
-            // Добавляем chatId в ответ
             response.data.chatId = chatId;
 
             return response.data;
