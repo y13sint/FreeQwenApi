@@ -4,7 +4,7 @@ import { sendMessage, getAllModels } from './chat.js';
 import { getAuthenticationStatus } from '../browser/browser.js';
 import { checkAuthentication } from '../browser/auth.js';
 import { getBrowserContext } from '../browser/browser.js';
-import { getAllChats, loadHistory, createChat, deleteChat, chatExists } from './chatHistory.js';
+import { getAllChats, loadHistory, createChat, deleteChat, chatExists, renameChat, deleteChatsAutomatically } from './chatHistory.js';
 
 const router = express.Router();
 
@@ -68,7 +68,8 @@ router.get('/status', async (req, res) => {
 
 router.post('/chats', (req, res) => {
     try {
-        const chatId = createChat();
+        const { name } = req.body;
+        const chatId = createChat(name);
         res.json({ chatId });
     } catch (error) {
         console.error('Ошибка при создании чата:', error);
@@ -114,6 +115,61 @@ router.delete('/chats/:chatId', (req, res) => {
         res.json({ success });
     } catch (error) {
         console.error('Ошибка при удалении чата:', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// Новый маршрут для переименования чата
+router.put('/chats/:chatId/rename', (req, res) => {
+    try {
+        const { chatId } = req.params;
+        const { name } = req.body;
+
+        if (!chatId || !chatExists(chatId)) {
+            return res.status(404).json({ error: 'Чат не найден' });
+        }
+
+        if (!name || typeof name !== 'string' || name.trim() === '') {
+            return res.status(400).json({ error: 'Имя чата не указано или некорректно' });
+        }
+
+        const success = renameChat(chatId, name.trim());
+        res.json({ success, chatId, name: name.trim() });
+    } catch (error) {
+        console.error('Ошибка при переименовании чата:', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// Новый маршрут для автоудаления чатов
+router.post('/chats/cleanup', (req, res) => {
+    try {
+        const criteria = req.body || {};
+
+        // Валидация входных параметров
+        if (criteria.olderThan && (typeof criteria.olderThan !== 'number' || criteria.olderThan <= 0)) {
+            return res.status(400).json({ error: 'Некорректное значение olderThan' });
+        }
+
+        if (criteria.userMessageCountLessThan !== undefined &&
+            (typeof criteria.userMessageCountLessThan !== 'number' || criteria.userMessageCountLessThan < 0)) {
+            return res.status(400).json({ error: 'Некорректное значение userMessageCountLessThan' });
+        }
+
+        if (criteria.messageCountLessThan !== undefined &&
+            (typeof criteria.messageCountLessThan !== 'number' || criteria.messageCountLessThan < 0)) {
+            return res.status(400).json({ error: 'Некорректное значение messageCountLessThan' });
+        }
+
+        if (criteria.maxChats !== undefined &&
+            (typeof criteria.maxChats !== 'number' || criteria.maxChats <= 0)) {
+            return res.status(400).json({ error: 'Некорректное значение maxChats' });
+        }
+
+        const result = deleteChatsAutomatically(criteria);
+        res.json(result);
+    } catch (error) {
+        console.error('Ошибка при автоматическом удалении чатов:', error);
         res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
