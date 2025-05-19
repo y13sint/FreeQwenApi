@@ -10,6 +10,7 @@ import apiRoutes from './src/api/routes.js';
 import { getAvailableModelsFromFile } from './src/api/chat.js';
 import { initHistoryDirectory } from './src/api/chatHistory.js';
 import { hasSession } from './src/browser/session.js';
+import { logHttpRequest, logInfo, logError, logWarn } from './src/logger/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -22,6 +23,9 @@ const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout
 });
+
+// Middleware для логирования HTTP-запросов
+app.use(logHttpRequest);
 
 app.use(bodyParser.json());
 
@@ -40,20 +44,31 @@ app.use((req, res, next) => {
 
 app.use('/api', apiRoutes);
 
+// Обработчик 404
+app.use((req, res) => {
+    logWarn(`404 Not Found: ${req.method} ${req.originalUrl}`);
+    res.status(404).json({ error: 'Эндпоинт не найден' });
+});
+
+// Обработчик ошибок
+app.use((err, req, res, next) => {
+    logError('Внутренняя ошибка сервера', err);
+    res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+});
 
 process.on('SIGINT', handleShutdown);
 process.on('SIGTERM', handleShutdown);
 process.on('SIGHUP', handleShutdown);
 
 process.on('uncaughtException', async (error) => {
-    console.error('Необработанное исключение:', error);
+    logError('Необработанное исключение', error);
     await handleShutdown();
 });
 
 async function handleShutdown() {
-    console.log('\nПолучен сигнал завершения. Закрываем браузер...');
+    logInfo('\nПолучен сигнал завершения. Закрываем браузер...');
     await shutdownBrowser();
-    console.log('Завершение работы.');
+    logInfo('Завершение работы.');
 
     if (rl) {
         rl.close();
@@ -74,22 +89,22 @@ function promptLaunchMode() {
                 const useSavedSession = answer !== '2';
 
                 if (useSavedSession) {
-                    console.log('\nЗапуск сервера с сохраненной сессией...\n');
+                    logInfo('\nЗапуск сервера с сохраненной сессией...\n');
                 } else {
-                    console.log('\nЗапуск сервера с новой авторизацией...\n');
+                    logInfo('\nЗапуск сервера с новой авторизацией...\n');
                 }
 
                 resolve(!useSavedSession);
             });
         } else {
-            console.log('\nСохраненная сессия не найдена, выполняется запуск с новой авторизацией...\n');
+            logInfo('\nСохраненная сессия не найдена, выполняется запуск с новой авторизацией...\n');
             resolve(true);
         }
     });
 }
 
 async function startServer() {
-    console.log('Запуск сервера...');
+    logInfo('Запуск сервера...');
 
     initHistoryDirectory();
 
@@ -99,36 +114,38 @@ async function startServer() {
 
     const browserInitialized = await initBrowser(visibleMode);
     if (!browserInitialized) {
-        console.error('Не удалось инициализировать браузер. Завершение работы.');
+        logError('Не удалось инициализировать браузер. Завершение работы.');
         process.exit(1);
     }
 
     try {
         app.listen(port, () => {
-            console.log(`Сервер запущен на порту ${port}`);
-            console.log(`API доступен по адресу: http://localhost:${port}/api`);
-            console.log('Для проверки статуса авторизации: GET /api/status');
-            console.log('Для отправки сообщения: POST /api/chat');
-            console.log('Для получения списка моделей: GET /api/models');
-            console.log('======================================================');
-            console.log('Управление чатами:');
-            console.log('Создать новый чат: POST /api/chats');
-            console.log('Получить список чатов: GET /api/chats');
-            console.log('Получить историю чата: GET /api/chats/:chatId');
-            console.log('Удалить чат: DELETE /api/chats/:chatId');
-            console.log('======================================================');
-            console.log('Формат JSON запроса на чат:');
-            console.log('{ "message": "текст сообщения", "model": "название модели (опционально)", "chatId": "ID чата (опционально)" }');
-            console.log('Пример запроса: { "message": "Привет, как дела?" }');
-            console.log('Пример запроса с сохранением контекста: { "message": "Привет, как дела?", "chatId": "полученный_id_чата" }');
-            console.log('======================================================');
+            logInfo(`Сервер запущен на порту ${port}`);
+            logInfo(`API доступен по адресу: http://localhost:${port}/api`);
+            logInfo('Для проверки статуса авторизации: GET /api/status');
+            logInfo('Для отправки сообщения: POST /api/chat');
+            logInfo('Для получения списка моделей: GET /api/models');
+            logInfo('======================================================');
+            logInfo('Управление чатами:');
+            logInfo('Создать новый чат: POST /api/chats');
+            logInfo('Получить список чатов: GET /api/chats');
+            logInfo('Получить историю чата: GET /api/chats/:chatId');
+            logInfo('Удалить чат: DELETE /api/chats/:chatId');
+            logInfo('Переименовать чат: PUT /api/chats/:chatId/rename');
+            logInfo('Автоудаление чатов: POST /api/chats/cleanup');
+            logInfo('======================================================');
+            logInfo('Формат JSON запроса на чат:');
+            logInfo('{ "message": "текст сообщения", "model": "название модели (опционально)", "chatId": "ID чата (опционально)" }');
+            logInfo('Пример запроса: { "message": "Привет, как дела?" }');
+            logInfo('Пример запроса с сохранением контекста: { "message": "Привет, как дела?", "chatId": "полученный_id_чата" }');
+            logInfo('======================================================');
 
             getAvailableModelsFromFile();
         });
     } catch (err) {
         if (err.code === 'EADDRINUSE') {
-            console.error(`Порт ${port} уже используется. Возможно, сервер уже запущен.`);
-            console.error('Завершите работу существующего сервера или используйте другой порт.');
+            logError(`Порт ${port} уже используется. Возможно, сервер уже запущен.`);
+            logError('Завершите работу существующего сервера или используйте другой порт.');
             await shutdownBrowser();
             process.exit(1);
         } else {
@@ -138,7 +155,7 @@ async function startServer() {
 }
 
 startServer().catch(async error => {
-    console.error('Ошибка при запуске сервера:', error);
+    logError('Ошибка при запуске сервера:', error);
     await shutdownBrowser();
 
     if (rl) {

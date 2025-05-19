@@ -210,11 +210,18 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
 
         const history = loadHistory(chatId);
 
-        const messages = history.map(msg => ({
-            role: msg.role,
-            content: msg.content,
-            chat_type: "t2t"
-        }));
+        // Получаем сообщения из нового формата истории
+        const messages = Array.isArray(history)
+            ? history.map(msg => ({
+                role: msg.role,
+                content: msg.content,
+                chat_type: "t2t"
+            }))
+            : (history.messages || []).map(msg => ({
+                role: msg.role,
+                content: msg.content,
+                chat_type: "t2t"
+            }));
 
         const payload = {
             chat_type: "t2t",
