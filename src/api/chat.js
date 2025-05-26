@@ -19,7 +19,8 @@ const MODELS_FILE = path.join(__dirname, '..', 'AvaibleModels.txt');
 let authToken = loadAuthToken();
 let availableModels = null;
 
-const pagePool = {
+
+export const pagePool = {
     pages: [],
     maxSize: 3,
 
@@ -141,7 +142,7 @@ export function getAllModels() {
     };
 }
 
-export async function sendMessage(message, model = "qwen-max-latest", chatId = null) {
+export async function sendMessage(message, model = "qwen-max-latest", chatId = null, files = null) {
 
     if (!availableModels) {
         availableModels = getAvailableModelsFromFile();
@@ -152,7 +153,17 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
         console.log(`Создан новый чат с ID: ${chatId}`);
     }
 
-    addUserMessage(chatId, message);
+    // Поддержка сообщений с файлами
+    if (typeof message === 'string') {
+        // Если сообщение - это простая строка, добавляем ее как обычно
+        addUserMessage(chatId, message);
+    } else if (Array.isArray(message)) {
+        // Если сообщение - это массив (текст + файлы), добавляем его как составное сообщение
+        addUserMessage(chatId, message);
+    } else {
+        console.error('Неподдерживаемый формат сообщения:', message);
+        return { error: 'Неподдерживаемый формат сообщения', chatId };
+    }
 
     if (!model || model.trim() === "") {
         model = "qwen-max-latest";
@@ -229,6 +240,11 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
             model: model,
             stream: false
         };
+
+        // Добавляем файлы в payload, если они есть
+        if (files && Array.isArray(files) && files.length > 0) {
+            payload.files = files;
+        }
 
         console.log(`Отправляемый запрос с историей из ${messages.length} сообщений`);
 

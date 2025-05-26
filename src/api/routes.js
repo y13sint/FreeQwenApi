@@ -214,4 +214,13 @@ router.put('/chats/:chatId/rename', (req, res) => {
     }
 });
 
-export default router; 
+router.post('/analyze/network', (req, res) => {
+    try {
+        return res.json({ success: true });
+    } catch (error) {
+        logError('Ошибка при анализе сети', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+})
+
+export default router;
