@@ -232,7 +232,7 @@ export function getAllChats() {
                 const chatId = file.replace('.json', '');
                 const chatData = loadHistory(chatId);
 
-                // Проверяем, был ли выполнен перевод формата
+                // Проверяем, был ли выполнен перевод формата - old 
                 if (chatData.wasConverted) {
                     convertedCount++;
                 }
