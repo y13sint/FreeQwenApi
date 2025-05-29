@@ -155,6 +155,21 @@ export function addUserMessage(chatId, content) {
     const timestamp = Math.floor(Date.now() / 1000);
     const messageId = crypto.randomUUID();
 
+    // Определяем тип содержимого и его длину для логирования
+    let contentDesc;
+    if (Array.isArray(content)) {
+        // Составное сообщение (текст + изображения)
+        const textParts = content.filter(item => item.type === 'text');
+        const imageParts = content.filter(item => item.type === 'image');
+        const fileParts = content.filter(item => item.type === 'file');
+
+        contentDesc = `составное сообщение (${textParts.length} текст., ${imageParts.length} изобр., ${fileParts.length} файл.)`;
+    } else if (typeof content === 'object' && content !== null) {
+        contentDesc = 'объект-сообщение';
+    } else {
+        contentDesc = `текст длиной ${String(content).length}`;
+    }
+
     const message = {
         id: messageId,
         role: "user",
@@ -163,7 +178,7 @@ export function addUserMessage(chatId, content) {
         chat_type: "t2t"
     };
 
-    logInfo(`Добавление сообщения пользователя в чат ${chatId}, длина: ${content.length}`);
+    logInfo(`Добавление сообщения пользователя в чат ${chatId}: ${contentDesc}`);
     return addMessageToHistory(chatId, message);
 }
 

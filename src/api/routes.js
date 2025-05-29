@@ -51,14 +51,32 @@ router.post('/chats/cleanup', (req, res) => {
 
 router.post('/chat', async (req, res) => {
     try {
-        const { message, model, chatId } = req.body;
+        const { message, messages, model, chatId } = req.body;
 
-        if (!message) {
+        // Поддержка как message, так и messages для совместимости
+        let messageContent = message;
+
+        // Если указан параметр messages (множественное число), используем его в приоритете
+        if (messages && Array.isArray(messages)) {
+            // Преобразуем формат messages в формат сообщения, понятный нашему прокси
+            if (messages.length > 0) {
+                const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
+                if (lastUserMessage) {
+                    if (Array.isArray(lastUserMessage.content)) {
+                        messageContent = lastUserMessage.content;
+                    } else {
+                        messageContent = lastUserMessage.content;
+                    }
+                }
+            }
+        }
+
+        if (!messageContent) {
             logError('Запрос без сообщения');
             return res.status(400).json({ error: 'Сообщение не указано' });
         }
 
-        logInfo(`Получен запрос: ${message.substring(0, 50)}${message.length > 50 ? '...' : ''}`);
+        logInfo(`Получен запрос: ${typeof messageContent === 'string' ? messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : '') : 'Составное сообщение'}`);
         if (chatId) {
             logInfo(`Используется chatId: ${chatId}`);
         }
@@ -66,7 +84,7 @@ router.post('/chat', async (req, res) => {
             logInfo(`Используется модель: ${model}`);
         }
 
-        const result = await sendMessage(message, model, chatId);
+        const result = await sendMessage(messageContent, model, chatId);
 
         // Проверяем наличие ответа и корректно логируем его
         if (result.choices && result.choices[0] && result.choices[0].message) {

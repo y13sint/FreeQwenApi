@@ -153,16 +153,33 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
         console.log(`Создан новый чат с ID: ${chatId}`);
     }
 
-    // Поддержка сообщений с файлами
-    if (typeof message === 'string') {
-        // Если сообщение - это простая строка, добавляем ее как обычно
-        addUserMessage(chatId, message);
-    } else if (Array.isArray(message)) {
-        // Если сообщение - это массив (текст + файлы), добавляем его как составное сообщение
-        addUserMessage(chatId, message);
-    } else {
-        console.error('Неподдерживаемый формат сообщения:', message);
-        return { error: 'Неподдерживаемый формат сообщения', chatId };
+    // Проверка и обработка сообщений
+    try {
+        if (typeof message === 'string') {
+            // Если сообщение - это простая строка, добавляем ее как обычно
+            addUserMessage(chatId, message);
+        } else if (Array.isArray(message)) {
+            // Если сообщение - это массив (текст + изображения), добавляем его как составное сообщение
+            // Проверяем, что все элементы имеют корректную структуру
+            const isValid = message.every(item =>
+                (item.type === 'text' && typeof item.text === 'string') ||
+                (item.type === 'image' && typeof item.image === 'string') ||
+                (item.type === 'file' && typeof item.file === 'string')
+            );
+
+            if (!isValid) {
+                console.error('Некорректная структура составного сообщения');
+                return { error: 'Некорректная структура составного сообщения', chatId };
+            }
+
+            addUserMessage(chatId, message);
+        } else {
+            console.error('Неподдерживаемый формат сообщения:', message);
+            return { error: 'Неподдерживаемый формат сообщения', chatId };
+        }
+    } catch (error) {
+        console.error('Ошибка при обработке сообщения:', error);
+        return { error: 'Ошибка при обработке сообщения: ' + error.message, chatId };
     }
 
     if (!model || model.trim() === "") {
