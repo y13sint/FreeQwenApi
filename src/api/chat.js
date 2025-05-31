@@ -255,10 +255,9 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
             chat_type: "t2t",
             messages: messages,
             model: model,
-            stream: false
+            stream: false 
         };
 
-        // Добавляем файлы в payload, если они есть
         if (files && Array.isArray(files) && files.length > 0) {
             payload.files = files;
         }
@@ -321,7 +320,9 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
 
             addAssistantMessage(chatId, assistantContent, responseInfo);
 
+
             response.data.chatId = chatId;
+            response.data.id = response.data.id || "chatcmpl-" + Date.now();
 
             return response.data;
         } else {

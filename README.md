@@ -336,3 +336,55 @@ curl -X POST http://localhost:3264/api/chat \
 2. **Преобразование форматов:** Независимо от того, какой формат использует клиент (упрощенный `message` или стандартный `messages`), внутренне прокси всегда отправляет запросы к официальному API Qwen в формате `messages`, включая полную историю диалога.
 
 3. **Работа с историей:** При использовании формата `messages` прокси извлекает только последнее сообщение пользователя для добавления в историю. Предыдущие сообщения уже хранятся на сервере и определяются по `chatId`.
+
+
+| Эндпоинт | Метод | Описание |
+|----------|-------|----------|
+| `/api/chat/completions` | POST 
+
+```json
+{
+  "messages": [
+    {"role": "user", "content": "Напиши длинный рассказ о космосе"}
+  ],
+  "model": "qwen-max-latest",
+  "stream": true
+}
+```
+
+
+### Пример использования с OpenAI API клиентом
+
+```javascript
+// Пример использования с OpenAI Node.js SDK
+import OpenAI from 'openai';
+
+const openai = new OpenAI({
+  baseURL: 'http://localhost:3264/api', // Базовый URL прокси
+  apiKey: 'не_требуется_но_поле_обязательное', // Ключ не требуется, но поле обязательное для библиотеки
+});
+
+// Запрос без streaming
+const completion = await openai.chat.completions.create({
+  messages: [{ role: 'user', content: 'Привет, как дела?' }],
+  model: 'qwen-max-latest', // Используемая модель Qwen
+});
+
+console.log(completion.choices[0].message);
+
+// Запрос со streaming
+const stream = await openai.chat.completions.create({
+  messages: [{ role: 'user', content: 'Расскажи длинную историю о космосе' }],
+  model: 'qwen-max-latest',
+  stream: true,
+});
+
+for await (const chunk of stream) {
+  process.stdout.write(chunk.choices[0]?.delta?.content || '');
+}
+```
+
+### Ограничения совместимости
+
+1. Параметр `include_history`: Не реализован. Вместо этого история всегда определяется по `chatId`.
+2. Некоторые специфичные для OpenAI параметры (например, `logprobs`, `functions` и т.д.) не поддерживаются, так как они отсутствуют в API Qwen.

@@ -241,4 +241,96 @@ router.post('/analyze/network', (req, res) => {
     }
 })
 
+router.post('/chat/completions', async (req, res) => {
+    try {
+        const { messages, model, stream} = req.body;
+        const chatId = req.body.chatId;
+
+        logInfo(`Получен OpenAI-совместимый запрос${stream ? ' (stream)' : ''}`);
+
+        if (!messages || !Array.isArray(messages) || messages.length === 0) {
+            logError('Запрос без сообщений');
+            return res.status(400).json({ error: 'Сообщения не указаны' });
+        }
+
+        const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
+        if (!lastUserMessage) {
+            logError('В запросе нет сообщений от пользователя');
+            return res.status(400).json({ error: 'В запросе нет сообщений от пользователя' });
+        }
+
+        const messageContent = lastUserMessage.content;
+
+        if (stream) {
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n');
+
+            try {
+                const result = await sendMessage(messageContent, model, chatId);
+
+                if (result.error) {
+                    res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Error: ' + result.error + '"},"finish_reason":null}]}\n\n');
+                } else if (result.choices && result.choices[0] && result.choices[0].message) {
+                    const content = result.choices[0].message.content || '';
+
+
+                    const chunkSize = 8;
+                    for (let i = 0; i < content.length; i += chunkSize) {
+                        const chunk = content.substring(i, i + chunkSize);
+                        res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"' + chunk.replace(/\n/g, "\\n").replace(/"/g, '\\"') + '"},"finish_reason":null}]}\n\n');
+
+                        await new Promise(resolve => setTimeout(resolve, 10));
+                    }
+                }
+
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n');
+                res.write('data: [DONE]\n\n');
+                res.end();
+
+            } catch (error) {
+                logError('Ошибка при обработке потокового запроса', error);
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Internal server error"},"finish_reason":"stop"}]}\n\n');
+                res.write('data: [DONE]\n\n');
+                res.end();
+            }
+        } else {
+            const result = await sendMessage(messageContent, model, chatId);
+
+            if (result.error) {
+                return res.status(500).json({
+                    error: { message: result.error, type: "server_error" }
+                });
+            }
+
+
+            const openaiResponse = {
+                id: result.id || "chatcmpl-" + Date.now(),
+                object: "chat.completion",
+                created: Math.floor(Date.now() / 1000),
+                model: result.model || model || "qwen-max-latest",
+                choices: result.choices || [{
+                    index: 0,
+                    message: {
+                        role: "assistant",
+                        content: result.choices?.[0]?.message?.content || ""
+                    },
+                    finish_reason: "stop"
+                }],
+                usage: result.usage || {
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    total_tokens: 0
+                }
+            };
+
+            res.json(openaiResponse);
+        }
+    } catch (error) {
+        logError('Ошибка при обработке запроса', error);
+        res.status(500).json({ error: { message: 'Внутренняя ошибка сервера', type: "server_error" } });
+    }
+});
+
 export default router;
