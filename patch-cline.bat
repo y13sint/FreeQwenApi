@@ -32,6 +32,8 @@ if not exist "%EXT_PATH%-" (
 :: Замена строки в файле
 echo Меняю URL API на http://localhost:3264/api
 powershell -Command "(Get-Content '%EXT_PATH%') -replace 'https://dashscope.aliyuncs.com/compatible-mode/v1',  'http://localhost:3264/api' | Set-Content '%EXT_PATH%'"
+powershell -Command "(Get-Content '%EXT_PATH%') -replace 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',  'http://localhost:3264/api' | Set-Content '%EXT_PATH%'"
+
 
 :: Определение пути к VS Code
 set VSCODE_PATH=C:\Users\%USERNAME%\AppData\Local\Programs\Microsoft VS Code\Code.exe
