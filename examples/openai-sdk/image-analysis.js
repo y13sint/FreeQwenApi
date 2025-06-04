@@ -27,7 +27,7 @@ async function analyzeImage() {
                         },
                         {
                             type: 'image',
-                            image: 'https://cdn.qwenlm.ai/bf6238a3-4578-49d6-b4a9-516e8a5eb27b/c88bc915-6ae7-4057-9bf9-1185c9141a0a_image.png?key=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyZXNvdXJjZV91c2VyX2lkIjoiYmY2MjM4YTMtNDU3OC00OWQ2LWI0YTktNTE2ZThhNWViMjdiIiwicmVzb3VyY2VfaWQiOiJjODhiYzkxNS02YWU3LTQwNTctOWJmOS0xMTg1YzkxNDFhMGEiLCJyZXNvdXJjZV9jaGF0X2lkIjpudWxsfQ.qPvHr4fq23IgzxmxOyFJuFcVL0AJlpGgPlWB8BHkrlo'
+                            image: IMAGE_URL
                         }
                     ]
                 }
