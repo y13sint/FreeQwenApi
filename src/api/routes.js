@@ -6,6 +6,7 @@ import { checkAuthentication } from '../browser/auth.js';
 import { getBrowserContext } from '../browser/browser.js';
 import { getAllChats, loadHistory, createChat, deleteChat, chatExists, renameChat, deleteChatsAutomatically, saveHistory } from './chatHistory.js';
 import { logInfo, logError, logDebug } from '../logger/index.js';
+import { getMappedModel } from './modelMapping.js';
 import crypto from 'crypto';
 
 const router = express.Router();
@@ -81,13 +82,18 @@ router.post('/chat', async (req, res) => {
         if (chatId) {
             logInfo(`Используется chatId: ${chatId}`);
         }
+        
+        let mappedModel = model;
         if (model) {
-            logInfo(`Используется модель: ${model}`);
+            mappedModel = getMappedModel(model);
+            if (mappedModel !== model) {
+                logInfo(`Модель "${model}" заменена на "${mappedModel}"`);
+            }
+            logInfo(`Используется модель: ${mappedModel}`);
         }
 
-        const result = await sendMessage(messageContent, model, chatId);
+        const result = await sendMessage(messageContent, mappedModel, chatId);
 
-        // Проверяем наличие ответа и корректно логируем его
         if (result.choices && result.choices[0] && result.choices[0].message) {
             const responseLength = result.choices[0].message.content ? result.choices[0].message.content.length : 0;
             logInfo(`Ответ успешно сформирован для запроса, длина ответа: ${responseLength}`);
@@ -247,11 +253,6 @@ router.post('/chat/completions', async (req, res) => {
         const { messages, model, stream} = req.body;
 
         logInfo(`Получен OpenAI-совместимый запрос${stream ? ' (stream)' : ''}`);
-        logDebug(`Детали запроса /chat/completions: ${JSON.stringify({
-            model: model,
-            stream: stream,
-            messages: messages
-        }, null, 2)}`);
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             logError('Запрос без сообщений');
@@ -260,8 +261,6 @@ router.post('/chat/completions', async (req, res) => {
 
         const chatId = createChat("OpenAI API Chat");
         logInfo(`Создан новый чат с ID: ${chatId} для запроса /chat/completions`);
-        
-
         
         let historyTransferred = false;
         try {
@@ -298,43 +297,48 @@ router.post('/chat/completions', async (req, res) => {
         }
 
         const messageContent = lastUserMessage.content;
+        
+        let mappedModel = model ? getMappedModel(model) : "qwen-max-latest";
+        if (model && mappedModel !== model) {
+            logInfo(`Модель "${model}" заменена на "${mappedModel}"`);
+        }
+        logInfo(`Используется модель: ${mappedModel}`);
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
-            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n');
+            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n');
 
             try {
-                const result = await sendMessage(messageContent, model, chatId);
+                const result = await sendMessage(messageContent, mappedModel, chatId);
 
                 if (result.error) {
-                    res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Error: ' + result.error + '"},"finish_reason":null}]}\n\n');
+                    res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Error: ' + result.error + '"},"finish_reason":null}]}\n\n');
                 } else if (result.choices && result.choices[0] && result.choices[0].message) {
                     const content = result.choices[0].message.content || '';
-
 
                     const chunkSize = 8;
                     for (let i = 0; i < content.length; i += chunkSize) {
                         const chunk = content.substring(i, i + chunkSize);
-                        res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"' + chunk.replace(/\n/g, "\\n").replace(/"/g, '\\"') + '"},"finish_reason":null}]}\n\n');
+                        res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"' + chunk.replace(/\n/g, "\\n").replace(/"/g, '\\"') + '"},"finish_reason":null}]}\n\n');
 
                         await new Promise(resolve => setTimeout(resolve, 10));
                     }
                 }
 
-                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n');
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n');
                 res.write('data: [DONE]\n\n');
                 res.end();
 
             } catch (error) {
                 logError('Ошибка при обработке потокового запроса', error);
-                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Internal server error"},"finish_reason":"stop"}]}\n\n');
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Internal server error"},"finish_reason":"stop"}]}\n\n');
                 res.write('data: [DONE]\n\n');
                 res.end();
             }
         } else {
-            const result = await sendMessage(messageContent, model, chatId);
+            const result = await sendMessage(messageContent, mappedModel, chatId);
 
             if (result.error) {
                 return res.status(500).json({
@@ -342,12 +346,11 @@ router.post('/chat/completions', async (req, res) => {
                 });
             }
 
-
             const openaiResponse = {
                 id: result.id || "chatcmpl-" + Date.now(),
                 object: "chat.completion",
                 created: Math.floor(Date.now() / 1000),
-                model: result.model || model || "qwen-max-latest",
+                model: result.model || mappedModel || "qwen-max-latest",
                 choices: result.choices || [{
                     index: 0,
                     message: {

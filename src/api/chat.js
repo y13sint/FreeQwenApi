@@ -4,6 +4,7 @@ import { checkVerification } from '../browser/auth.js';
 import { shutdownBrowser, initBrowser } from '../browser/browser.js';
 import { saveAuthToken, loadAuthToken } from '../browser/session.js';
 import { loadHistory, addUserMessage, addAssistantMessage, createChat, chatExists } from './chatHistory.js';
+import { getMappedModel } from './modelMapping.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -123,8 +124,14 @@ export function isValidModel(modelName) {
         availableModels = getAvailableModelsFromFile();
     }
 
+    // Сначала проверяем, есть ли модель непосредственно в доступных
+    if (availableModels.includes(modelName)) {
+        return true;
+    }
 
-    return availableModels.includes(modelName);
+    // Если нет, проверяем, можно ли ее сопоставить с доступной
+    const mappedModel = getMappedModel(modelName, null);
+    return mappedModel !== null && availableModels.includes(mappedModel);
 }
 
 
@@ -185,7 +192,15 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
     if (!model || model.trim() === "") {
         model = "qwen-max-latest";
     } else {
-        if (!isValidModel(model)) {
+        // Используем функцию маппинга моделей для получения доступной модели
+        const mappedModel = getMappedModel(model, "qwen-max-latest");
+        if (mappedModel !== model) {
+            console.log(`Модель "${model}" заменена на доступную модель "${mappedModel}"`);
+            model = mappedModel;
+        }
+        
+        // Дополнительная проверка на доступность модели
+        if (!availableModels.includes(model)) {
             console.warn(`Предупреждение: Указанная модель "${model}" не найдена в списке доступных моделей. Используется модель по умолчанию.`);
             model = "qwen-max-latest";
         }
