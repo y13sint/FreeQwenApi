@@ -4,8 +4,9 @@ import { sendMessage, getAllModels } from './chat.js';
 import { getAuthenticationStatus } from '../browser/browser.js';
 import { checkAuthentication } from '../browser/auth.js';
 import { getBrowserContext } from '../browser/browser.js';
-import { getAllChats, loadHistory, createChat, deleteChat, chatExists, renameChat, deleteChatsAutomatically } from './chatHistory.js';
+import { getAllChats, loadHistory, createChat, deleteChat, chatExists, renameChat, deleteChatsAutomatically, saveHistory } from './chatHistory.js';
 import { logInfo, logError, logDebug } from '../logger/index.js';
+import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -244,15 +245,52 @@ router.post('/analyze/network', (req, res) => {
 router.post('/chat/completions', async (req, res) => {
     try {
         const { messages, model, stream} = req.body;
-        const chatId = req.body.chatId;
 
         logInfo(`Получен OpenAI-совместимый запрос${stream ? ' (stream)' : ''}`);
+        logDebug(`Детали запроса /chat/completions: ${JSON.stringify({
+            model: model,
+            stream: stream,
+            messages: messages
+        }, null, 2)}`);
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
             logError('Запрос без сообщений');
             return res.status(400).json({ error: 'Сообщения не указаны' });
         }
 
+        const chatId = createChat("OpenAI API Chat");
+        logInfo(`Создан новый чат с ID: ${chatId} для запроса /chat/completions`);
+        
+
+        
+        let historyTransferred = false;
+        try {
+            logInfo(`Перенос истории сообщений из запроса в чат ${chatId}`);
+            const chatData = loadHistory(chatId);
+            
+            for (const msg of messages) {
+                const timestamp = Math.floor(Date.now() / 1000);
+                const messageId = crypto.randomUUID();
+                
+                const formattedMessage = {
+                    id: messageId,
+                    role: msg.role,
+                    content: msg.content,
+                    timestamp: timestamp,
+                    chat_type: "t2t"
+                };
+                
+                chatData.messages.push(formattedMessage);
+                logDebug(`Добавлено сообщение с ролью "${msg.role}" в историю чата ${chatId}`);
+            }
+            
+            saveHistory(chatId, chatData);
+            historyTransferred = true;
+            logInfo(`История из ${messages.length} сообщений успешно перенесена в чат ${chatId}`);
+        } catch (error) {
+            logError(`Ошибка при переносе истории в чат ${chatId}`, error);
+        }
+        
         const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
         if (!lastUserMessage) {
             logError('В запросе нет сообщений от пользователя');
