@@ -36,7 +36,10 @@ export async function checkAuthentication(context) {
         await page.goto(AUTH_URL);
         await page.waitForLoadState('domcontentloaded');
 
-        await page.waitForTimeout(2000);
+await page.waitForTimeout(2000).catch(error => {
+    console.error('Ошибка при ожидании загрузки страницы:', error);
+    throw error;
+});
 
         const pageTitle = await page.title();
         const hasVerification = pageTitle.includes('Verification');
@@ -137,7 +140,10 @@ export async function startManualAuthentication(context) {
         await promptUser('После успешной авторизации нажмите ENTER для продолжения...');
         console.log('Пользователь подтвердил завершение авторизации. Подождите...');
 
-        await page.goto(AUTH_URL);
+await page.goto(AUTH_URL).catch(error => {
+    console.error('Ошибка при переходе на страницу авторизации:', error);
+    throw error;
+});
         await page.waitForLoadState('domcontentloaded');
         await page.waitForTimeout(2000);
 
@@ -198,4 +204,4 @@ export async function checkVerification(page) {
         console.error('Ошибка при проверке верификации:', error);
         return false;
     }
-} 
+}

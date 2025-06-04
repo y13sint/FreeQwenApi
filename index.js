@@ -27,8 +27,8 @@ const rl = readline.createInterface({
 // Middleware для логирования HTTP-запросов
 app.use(logHttpRequest);
 
-app.use(bodyParser.json());
-
+app.use(bodyParser.json({ limit: '150mb' }));
+app.use(bodyParser.urlencoded({ limit: '150mb', extended: true }));
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
