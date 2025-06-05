@@ -70,6 +70,7 @@ start.bat
 | `/api/chat/completions` | POST | OpenAI-совместимый эндпоинт с поддержкой streaming |
 | `/api/models` | GET | Получение списка доступных моделей |
 | `/api/status` | GET | Проверка статуса авторизации |
+| `/api/upload` | POST | Загрузка изображения для использования в запросах |
 | `/api/chats` | POST | Создание нового диалога |
 | `/api/chats` | GET | Получение списка всех диалогов |
 | `/api/chats/:chatId` | GET | Получение истории диалога |
@@ -164,7 +165,24 @@ start.bat
 
 Для отправки изображений через API прокси необходимо сначала получить URL изображения. Это можно сделать следующим образом:
 
-ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ ССЫЛКИ ЧЕРЕЗ ПРОКСИ БУДЕТ ДОБАВЛЕНА В СКОРОМ ВРЕМЕНИ
+#### Способ 1: Загрузка через API прокси
+
+Отправьте POST запрос на эндпоинт `/api/upload` для загрузки изображения:
+
+```bash
+curl -X POST http://localhost:3264/api/upload \
+  -F "file=@/путь/к/изображению.jpg"
+```
+
+Ответ будет содержать URL изображения для использования в запросах к API:
+
+```json
+{
+  "imageUrl": "https://cdn.qwenlm.ai/user-id/file-id_filename.jpg?key=..."
+}
+```
+
+#### Способ 2: Получение URL через веб-интерфейс Qwen
 
 1. Загрузите изображение в официальном веб-интерфейсе Qwen (<https://chat.qwen.ai/>)
 2. Откройте инструменты разработчика в браузере (F12 или Ctrl+Shift+I)
@@ -246,6 +264,36 @@ POST http://localhost:3264/api/chats/cleanup
 }
 ```
 
+### Загрузка файлов
+
+#### Загрузка изображения
+
+```
+POST http://localhost:3264/api/upload
+```
+
+Формат запроса: `multipart/form-data`
+
+Параметры:
+- `file` - файл изображения (поддерживаются форматы: jpg, jpeg, png, gif, webp)
+
+Пример использования с curl:
+
+```bash
+curl -X POST http://localhost:3264/api/upload \
+  -F "file=@/путь/к/изображению.jpg"
+```
+
+Пример ответа:
+
+```json
+{
+  "imageUrl": "https://cdn.qwenlm.ai/user-id/file-id_filename.jpg?key=..."
+}
+```
+
+Полученный URL изображения можно использовать в запросах с изображениями, как описано в разделе [Работа с изображениями](#работа-с-изображениями).
+
 ## Примеры использования
 
 ### Текстовые запросы
@@ -275,6 +323,34 @@ curl -X POST http://localhost:3264/api/chat \
 ```
 
 ### Запросы с изображениями
+
+#### Пример загрузки изображения и отправки запроса с ним
+
+```bash
+# Шаг 1: Загрузка изображения
+UPLOAD_RESPONSE=$(curl -s -X POST http://localhost:3264/api/upload \
+  -F "file=@/путь/к/изображению.jpg")
+
+# Шаг 2: Извлечение URL изображения
+IMAGE_URL=$(echo $UPLOAD_RESPONSE | grep -o '"imageUrl":"[^"]*"' | sed 's/"imageUrl":"//;s/"//')
+
+# Шаг 3: Отправка запроса с изображением
+curl -X POST http://localhost:3264/api/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "message": [
+      {
+        "type": "text",
+        "text": "Опишите объекты на этом изображении"
+      },
+      {
+        "type": "image",
+        "image": "'$IMAGE_URL'"
+      }
+    ],
+    "model": "qwen3-235b-a22b"
+  }'
+```
 
 #### Пример запроса с изображением
 
@@ -401,6 +477,8 @@ npm run example:stream   # Пример с потоковым режимом
 ```javascript
 // Пример использования с OpenAI Node.js SDK
 import OpenAI from 'openai';
+import fs from 'fs';
+import axios from 'axios';
 
 const openai = new OpenAI({
   baseURL: 'http://localhost:3264/api', // Базовый URL прокси
@@ -425,6 +503,37 @@ const stream = await openai.chat.completions.create({
 for await (const chunk of stream) {
   process.stdout.write(chunk.choices[0]?.delta?.content || '');
 }
+
+// Загрузка и использование изображения
+async function uploadAndAnalyzeImage(imagePath) {
+  // Загрузка изображения через API прокси
+  const formData = new FormData();
+  formData.append('file', fs.createReadStream(imagePath));
+  
+  const uploadResponse = await axios.post('http://localhost:3264/api/upload', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  });
+  
+  const imageUrl = uploadResponse.data.imageUrl;
+  
+  // Создание запроса с изображением
+  const completion = await openai.chat.completions.create({
+    messages: [
+      { 
+        role: 'user', 
+        content: [
+          { type: 'text', text: 'Опиши, что изображено на этой картинке?' },
+          { type: 'image', image: imageUrl }
+        ] 
+      }
+    ],
+    model: 'qwen3-235b-a22b',
+  });
+  
+  console.log(completion.choices[0].message.content);
+}
+
+// Использование: uploadAndAnalyzeImage('./image.jpg');
 ```
 
 ### Ограничения совместимости
