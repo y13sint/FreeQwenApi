@@ -15,7 +15,8 @@
         "example:compatibility": "node examples/openai-sdk/openai-compatibility.js",
         "example:direct": "node examples/direct-api/fetch-example.js",
         "example:axios": "node examples/direct-api/axios-example.js",
-        "example:chat-management": "node examples/direct-api/chat-management.js"
+        "example:chat-management": "node examples/direct-api/chat-management.js",
+        "example:file-upload": "node examples/file-upload/upload-example.js"
     },
     "dependencies": {
         "ali-oss": "^6.23.0",

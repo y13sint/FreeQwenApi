@@ -7,9 +7,33 @@ import { getBrowserContext } from '../browser/browser.js';
 import { getAllChats, loadHistory, createChat, deleteChat, chatExists, renameChat, deleteChatsAutomatically, saveHistory } from './chatHistory.js';
 import { logInfo, logError, logDebug } from '../logger/index.js';
 import { getMappedModel } from './modelMapping.js';
+import { getStsToken, uploadFileToQwen } from './fileUpload.js';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import crypto from 'crypto';
 
 const router = express.Router();
+
+// Настройка multer для загрузки файлов
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        const uploadDir = path.join(process.cwd(), 'uploads');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        cb(null, uploadDir);
+    },
+    filename: function (req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + crypto.randomBytes(8).toString('hex');
+        cb(null, uniqueSuffix + '-' + file.originalname);
+    }
+});
+
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB макс. размер
+});
 
 // Маршрут для автоудаления чатов 
 // (должен быть определен до маршрутов с параметрами, чтобы избежать конфликта с /:chatId)
@@ -370,6 +394,68 @@ router.post('/chat/completions', async (req, res) => {
     } catch (error) {
         logError('Ошибка при обработке запроса', error);
         res.status(500).json({ error: { message: 'Внутренняя ошибка сервера', type: "server_error" } });
+    }
+});
+
+// Новый маршрут для получения STS токена
+router.post('/files/getstsToken', async (req, res) => {
+    try {
+        logInfo(`Запрос на получение STS токена: ${JSON.stringify(req.body)}`);
+        
+        const fileInfo = req.body;
+        if (!fileInfo || !fileInfo.filename || !fileInfo.filesize || !fileInfo.filetype) {
+            logError('Некорректные данные о файле');
+            return res.status(400).json({ error: 'Некорректные данные о файле' });
+        }
+        
+        const stsToken = await getStsToken(fileInfo);
+        res.json(stsToken);
+    } catch (error) {
+        logError('Ошибка при получении STS токена', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// Маршрут для загрузки файла
+router.post('/files/upload', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            logError('Файл не был загружен');
+            return res.status(400).json({ error: 'Файл не был загружен' });
+        }
+        
+        logInfo(`Файл загружен на сервер: ${req.file.originalname} (${req.file.size} байт)`);
+        
+        // Загружаем файл в Qwen OSS хранилище
+        const result = await uploadFileToQwen(req.file.path);
+        
+        // Удаляем временный файл после успешной загрузки
+        fs.unlinkSync(req.file.path);
+        
+        if (result.success) {
+            logInfo(`Файл успешно загружен в OSS: ${result.fileName}`);
+            res.json({
+                success: true,
+                file: {
+                    name: result.fileName,
+                    url: result.url,
+                    size: req.file.size,
+                    type: req.file.mimetype
+                }
+            });
+        } else {
+            logError(`Ошибка при загрузке файла в OSS: ${result.error}`);
+            res.status(500).json({ error: 'Ошибка при загрузке файла' });
+        }
+    } catch (error) {
+        logError('Ошибка при загрузке файла', error);
+        
+        // Удаляем временный файл в случае ошибки
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
