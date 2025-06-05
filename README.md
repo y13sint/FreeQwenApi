@@ -15,6 +15,7 @@
   - [Форматы запросов](#форматы-запросов)
   - [Работа с изображениями](#работа-с-изображениями)
   - [Управление диалогами](#управление-диалогами)
+  - [Загрузка файлов](#загрузка-файлов)
 - [Примеры использования](#примеры-использования)
   - [Текстовые запросы](#текстовые-запросы)
   - [Запросы с изображениями](#запросы-с-изображениями)
@@ -70,7 +71,7 @@ start.bat
 | `/api/chat/completions` | POST | OpenAI-совместимый эндпоинт с поддержкой streaming |
 | `/api/models` | GET | Получение списка доступных моделей |
 | `/api/status` | GET | Проверка статуса авторизации |
-| `/api/upload` | POST | Загрузка изображения для использования в запросах |
+| `/api/files/upload` | POST | Загрузка изображения для использования в запросах |
 | `/api/chats` | POST | Создание нового диалога |
 | `/api/chats` | GET | Получение списка всех диалогов |
 | `/api/chats/:chatId` | GET | Получение истории диалога |
@@ -167,10 +168,10 @@ start.bat
 
 #### Способ 1: Загрузка через API прокси
 
-Отправьте POST запрос на эндпоинт `/api/upload` для загрузки изображения:
+Отправьте POST запрос на эндпоинт `/api/files/upload` для загрузки изображения:
 
 ```bash
-curl -X POST http://localhost:3264/api/upload \
+curl -X POST http://localhost:3264/api/files/upload \
   -F "file=@/путь/к/изображению.jpg"
 ```
 
@@ -269,7 +270,7 @@ POST http://localhost:3264/api/chats/cleanup
 #### Загрузка изображения
 
 ```
-POST http://localhost:3264/api/upload
+POST http://localhost:3264/api/files/upload
 ```
 
 Формат запроса: `multipart/form-data`
@@ -280,14 +281,14 @@ POST http://localhost:3264/api/upload
 Пример использования с curl:
 
 ```bash
-curl -X POST http://localhost:3264/api/upload \
+curl -X POST http://localhost:3264/api/files/upload \
   -F "file=@/путь/к/изображению.jpg"
 ```
 
 #### Пример использования через Postman
 
 1. **Загрузка изображения**:
-   - Создайте новый запрос POST к `http://localhost:3264/api/upload`
+   - Создайте новый запрос POST к `http://localhost:3264/api/files/upload`
    - Выберите вкладку "Body"
    - Выберите тип "form-data"
    - Добавьте ключ "file" и выберите тип "File"
@@ -367,7 +368,7 @@ curl -X POST http://localhost:3264/api/chat \
 
 ```bash
 # Шаг 1: Загрузка изображения
-UPLOAD_RESPONSE=$(curl -s -X POST http://localhost:3264/api/upload \
+UPLOAD_RESPONSE=$(curl -s -X POST http://localhost:3264/api/files/upload \
   -F "file=@/путь/к/изображению.jpg")
 
 # Шаг 2: Извлечение URL изображения
@@ -549,7 +550,7 @@ async function uploadAndAnalyzeImage(imagePath) {
   const formData = new FormData();
   formData.append('file', fs.createReadStream(imagePath));
   
-  const uploadResponse = await axios.post('http://localhost:3264/api/upload', formData, {
+  const uploadResponse = await axios.post('http://localhost:3264/api/files/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   });
   
@@ -578,7 +579,7 @@ async function uploadAndAnalyzeImage(imagePath) {
 #### Пример использования через Postman с OpenAI-совместимым эндпоинтом
 
 1. **Загрузка изображения**:
-   - Создайте новый запрос POST к `http://localhost:3264/api/upload`
+   - Создайте новый запрос POST к `http://localhost:3264/api/files/upload`
    - Выберите вкладку "Body"
    - Выберите тип "form-data"
    - Добавьте ключ "file" и выберите тип "File"
