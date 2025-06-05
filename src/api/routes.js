@@ -18,7 +18,6 @@ router.post('/chats/cleanup', (req, res) => {
         logInfo(`Запрос на автоматическое удаление чатов: ${JSON.stringify(req.body)}`);
         const criteria = req.body || {};
 
-        // Валидация входных параметров
         if (criteria.olderThan && (typeof criteria.olderThan !== 'number' || criteria.olderThan <= 0)) {
             logError(`Некорректное значение olderThan: ${criteria.olderThan}`);
             return res.status(400).json({ error: 'Некорректное значение olderThan' });
