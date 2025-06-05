@@ -416,7 +416,7 @@ router.post('/files/getstsToken', async (req, res) => {
     }
 });
 
-// Маршрут для загрузки файла
+// Маршрут для загрузки файла - работает
 router.post('/files/upload', upload.single('file'), async (req, res) => {
     try {
         if (!req.file) {
