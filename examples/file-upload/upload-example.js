@@ -78,7 +78,7 @@ async function getTestStsToken(fileInfo) {
 }
 
 /**
- * Напрямую загружает файл через PUT запрос (для тестирования)
+ * Напрямую загружает файл через OSS (для тестирования)
  * @param {string} filePath - Путь к файлу
  * @param {Object} stsData - Данные STS токена
  * @returns {Promise<Object>} - Результат загрузки
@@ -87,15 +87,45 @@ async function directUploadFile(filePath, stsData) {
     try {
         console.log(`Прямая загрузка файла: ${filePath}`);
         
-        if (!stsData || !stsData.file_url) {
+        if (!stsData || !stsData.file_url || !stsData.file_path) {
             throw new Error('Некорректные данные STS токена');
         }
         
-        // В данном случае, файл уже загружен при получении STS токена
-        // Qwen.ai автоматически создает файл на сервере при получении токена
-        console.log(`Файл уже загружен и доступен по URL: ${stsData.file_url}`);
+        // Загружаем ali-oss библиотеку динамически
+        const OSS = (await import('ali-oss')).default;
         
-        // Проверяем, что файл действительно существует
+        // Проверяем наличие необходимых данных для OSS
+        if (!stsData.access_key_id || !stsData.access_key_secret || !stsData.security_token ||
+            !stsData.region || !stsData.bucketname) {
+            throw new Error('Неполные данные STS токена для OSS');
+        }
+        
+        console.log(`Создание OSS клиента: регион ${stsData.region}, бакет ${stsData.bucketname}`);
+        
+        // Создаем клиент OSS с STS токеном
+        const client = new OSS({
+            region: stsData.region,
+            accessKeyId: stsData.access_key_id,
+            accessKeySecret: stsData.access_key_secret,
+            stsToken: stsData.security_token,
+            bucket: stsData.bucketname,
+            secure: true, // Используем HTTPS
+            timeout: 60000 // 60 секунд таймаут
+        });
+        
+        // Получаем имя объекта из file_path
+        const objectName = stsData.file_path;
+        
+        console.log(`Загрузка файла в OSS: ${objectName}`);
+        
+        // Загружаем файл
+        const result = await client.put(objectName, filePath);
+        
+        console.log('Файл успешно загружен в OSS:');
+        console.log(`URL: ${stsData.file_url}`);
+        console.log(`Ответ OSS: ${JSON.stringify(result)}`);
+        
+        // Проверяем, что файл действительно загружен
         try {
             const verifyResponse = await axios.get(stsData.file_url);
             console.log(`Файл успешно проверен, статус: ${verifyResponse.status}`);
@@ -108,10 +138,11 @@ async function directUploadFile(filePath, stsData) {
             success: true,
             fileName: path.basename(filePath),
             url: stsData.file_url,
-            fileId: stsData.file_id
+            fileId: stsData.file_id,
+            ossResponse: result
         };
     } catch (error) {
-        console.error('Ошибка при проверке файла:');
+        console.error('Ошибка при загрузке файла в OSS:');
         if (error.response) {
             console.error(`Статус: ${error.response.status}`);
             console.error(error.response.data);

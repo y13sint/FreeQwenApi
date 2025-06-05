@@ -3,6 +3,7 @@ import axios from 'axios';
 import { getBrowserContext } from '../browser/browser.js';
 import { logInfo, logError } from '../logger/index.js';
 import { getAuthToken, extractAuthToken } from './chat.js';
+import OSS from 'ali-oss';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -73,27 +74,49 @@ export async function uploadFile(filePath, stsData) {
     try {
         logInfo(`Начало загрузки файла: ${filePath}`);
         
-        if (!stsData || !stsData.file_url) {
+        if (!stsData || !stsData.file_path) {
             throw new Error('Некорректные данные STS токена');
         }
         
-        // Используем OSS клиент с данными из STS токена
-        if (!stsData.access_key_id || !stsData.access_key_secret || !stsData.security_token) {
-            throw new Error('Неполные данные STS токена');
+        // Проверяем наличие необходимых данных для OSS
+        if (!stsData.access_key_id || !stsData.access_key_secret || !stsData.security_token ||
+            !stsData.region || !stsData.bucketname) {
+            throw new Error('Неполные данные STS токена для OSS');
         }
         
-        // Результат загрузки - это уже готовый URL файла, который мы можем использовать
-        logInfo(`Файл готов к использованию: ${stsData.file_path}`);
+        // Создаем клиент OSS с STS токеном
+        const client = new OSS({
+            region: stsData.region,
+            accessKeyId: stsData.access_key_id,
+            accessKeySecret: stsData.access_key_secret,
+            stsToken: stsData.security_token,
+            bucket: stsData.bucketname,
+            secure: true, // Используем HTTPS
+            timeout: 60000 // 60 секунд таймаут
+        });
+        
+        logInfo(`OSS клиент создан для региона ${stsData.region}, бакет: ${stsData.bucketname}`);
+        
+        // Получаем имя объекта из file_path
+        const objectName = stsData.file_path;
+        
+        // Загружаем файл
+        logInfo(`Загрузка файла в OSS: ${objectName}`);
+        const result = await client.put(objectName, filePath);
+        
+        logInfo(`Файл успешно загружен в OSS: ${objectName}`);
+        logInfo(`URL файла: ${stsData.file_url}`);
         
         return {
             success: true,
             fileName: path.basename(filePath),
             url: stsData.file_url,
             fileId: stsData.file_id,
-            filePath: stsData.file_path
+            filePath: stsData.file_path,
+            ossResponse: result
         };
     } catch (error) {
-        logError(`Ошибка при загрузке файла: ${error.message}`, error);
+        logError(`Ошибка при загрузке файла в OSS: ${error.message}`, error);
         return {
             success: false,
             error: error.message
