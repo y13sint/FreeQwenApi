@@ -36,10 +36,7 @@ export async function checkAuthentication(context) {
         await page.goto(AUTH_URL);
         await page.waitForLoadState('domcontentloaded');
 
-await page.waitForTimeout(2000).catch(error => {
-    console.error('Ошибка при ожидании загрузки страницы:', error);
-    throw error;
-});
+        await page.waitForTimeout(2000);
 
         const pageTitle = await page.title();
         const hasVerification = pageTitle.includes('Verification');
@@ -60,7 +57,7 @@ await page.waitForTimeout(2000).catch(error => {
 
             setAuthenticationStatus(true);
 
-            await extractAuthToken(context);
+            await extractAuthToken(context, true);
             await saveSession(context);
 
             console.log('Сессия сохранена успешно!');
@@ -94,7 +91,7 @@ await page.waitForTimeout(2000).catch(error => {
                 setAuthenticationStatus(true);
 
                 await saveSession(context);
-                await extractAuthToken(context);
+                await extractAuthToken(context, true);
 
                 console.log('Сессия сохранена успешно!');
                 console.log('======================================================');
@@ -140,10 +137,7 @@ export async function startManualAuthentication(context) {
         await promptUser('После успешной авторизации нажмите ENTER для продолжения...');
         console.log('Пользователь подтвердил завершение авторизации. Подождите...');
 
-await page.goto(AUTH_URL).catch(error => {
-    console.error('Ошибка при переходе на страницу авторизации:', error);
-    throw error;
-});
+        await page.goto(AUTH_URL);
         await page.waitForLoadState('domcontentloaded');
         await page.waitForTimeout(2000);
 
@@ -155,7 +149,7 @@ await page.goto(AUTH_URL).catch(error => {
 
             await saveSession(context);
 
-            await extractAuthToken(context);
+            await extractAuthToken(context, true);
 
             console.log('Сессия сохранена успешно!');
             console.log('======================================================');
@@ -204,4 +198,4 @@ export async function checkVerification(page) {
         console.error('Ошибка при проверке верификации:', error);
         return false;
     }
-}
+} 

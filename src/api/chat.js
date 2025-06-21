@@ -4,7 +4,6 @@ import { checkVerification } from '../browser/auth.js';
 import { shutdownBrowser, initBrowser } from '../browser/browser.js';
 import { saveAuthToken, loadAuthToken } from '../browser/session.js';
 import { loadHistory, addUserMessage, addAssistantMessage, createChat, chatExists } from './chatHistory.js';
-import { getMappedModel } from './modelMapping.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -70,18 +69,23 @@ export const pagePool = {
     }
 };
 
-export async function extractAuthToken(context) {
-    if (authToken) return authToken;
+export async function extractAuthToken(context, forceRefresh = false) {
+    // Если токен уже есть и обновление не требуется, сразу возвращаем его
+    if (authToken && !forceRefresh) {
+        return authToken;
+    }
 
     try {
         const page = await context.newPage();
         await page.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded' });
 
-        authToken = await page.evaluate(() => localStorage.getItem('token'));
+        // Получаем текущий токен из localStorage браузера
+        const newToken = await page.evaluate(() => localStorage.getItem('token'));
 
         await page.close();
 
-        if (authToken) {
+        if (newToken) {
+            authToken = newToken;
             console.log('Токен авторизации успешно извлечен');
             saveAuthToken(authToken);
             return authToken;
@@ -124,14 +128,8 @@ export function isValidModel(modelName) {
         availableModels = getAvailableModelsFromFile();
     }
 
-    // Сначала проверяем, есть ли модель непосредственно в доступных
-    if (availableModels.includes(modelName)) {
-        return true;
-    }
 
-    // Если нет, проверяем, можно ли ее сопоставить с доступной
-    const mappedModel = getMappedModel(modelName, null);
-    return mappedModel !== null && availableModels.includes(mappedModel);
+    return availableModels.includes(modelName);
 }
 
 
@@ -192,15 +190,7 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
     if (!model || model.trim() === "") {
         model = "qwen-max-latest";
     } else {
-        // Используем функцию маппинга моделей для получения доступной модели
-        const mappedModel = getMappedModel(model, "qwen-max-latest");
-        if (mappedModel !== model) {
-            console.log(`Модель "${model}" заменена на доступную модель "${mappedModel}"`);
-            model = mappedModel;
-        }
-        
-        // Дополнительная проверка на доступность модели
-        if (!availableModels.includes(model)) {
+        if (!isValidModel(model)) {
             console.warn(`Предупреждение: Указанная модель "${model}" не найдена в списке доступных моделей. Используется модель по умолчанию.`);
             model = "qwen-max-latest";
         }
@@ -406,4 +396,3 @@ export function getAuthToken() {
 export async function listModels(browserContext) {
     return await getAvailableModels(browserContext);
 } 
-
