@@ -255,7 +255,7 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
             chat_type: "t2t",
             messages: messages,
             model: model,
-            stream: false 
+            stream: false
         };
 
         if (files && Array.isArray(files) && files.length > 0) {
@@ -344,6 +344,23 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
                 await initBrowser(true);
 
                 return { error: 'Требуется верификация. Браузер запущен в видимом режиме.', verification: true, chatId };
+            }
+
+            // ----- Новая обработка истекшего токена / 401 Unauthorized -----
+            if ((response.status === 401) || (response.errorBody && (response.errorBody.includes('Unauthorized') || response.errorBody.includes('Token has expired')))) {
+                console.log('Получен ответ 401 Unauthorized или сообщение о просроченном токене. Очищаем токен и перезапускаем авторизацию...');
+
+                // Очищаем сохранённый токен и помечаем отсутствие авторизации
+                authToken = null;
+                saveAuthToken('');
+                setAuthenticationStatus(false);
+
+                // Перезапускаем браузер в видимом режиме для ручного входа
+                await pagePool.clear();
+                await shutdownBrowser();
+                await initBrowser(true);
+
+                return { error: 'Токен авторизации истёк. Пожалуйста, войдите заново в открывшемся браузере.', reauth: true, chatId };
             }
 
             return { error: response.error || response.statusText, details: response.errorBody || 'Нет дополнительных деталей', chatId };
