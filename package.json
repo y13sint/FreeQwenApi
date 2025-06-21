@@ -7,7 +7,16 @@
     "scripts": {
         "start": "node index.js",
         "test": "echo \"Error: no test specified\" && exit 1",
-        "example:stream": "node examples/openai-sdk/streaming.js"
+        "example:stream": "node examples/openai-sdk/streaming.js",
+        "example:simple": "node examples/openai-sdk/simple.js",
+        "example:system": "node examples/openai-sdk/system-message.js",
+        "example:image": "node examples/openai-sdk/image-analysis.js",
+        "example:conversation": "node examples/openai-sdk/conversation.js",
+        "example:compatibility": "node examples/openai-sdk/openai-compatibility.js",
+        "example:direct": "node examples/direct-api/fetch-example.js",
+        "example:axios": "node examples/direct-api/axios-example.js",
+        "example:chat-management": "node examples/direct-api/chat-management.js",
+        "example:file-upload": "node examples/file-upload/upload-example.js"
     },
     "dependencies": {
         "ali-oss": "^6.23.0",

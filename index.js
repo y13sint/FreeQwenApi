@@ -27,8 +27,8 @@ const rl = readline.createInterface({
 // Middleware для логирования HTTP-запросов
 app.use(logHttpRequest);
 
-app.use(bodyParser.json());
-
+app.use(bodyParser.json({ limit: '150mb' }));
+app.use(bodyParser.urlencoded({ limit: '150mb', extended: true }));
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
@@ -104,6 +104,16 @@ function promptLaunchMode() {
 }
 
 async function startServer() {
+    console.log(`
+███████ ██████  ███████ ███████  ██████  ██     ██ ███████ ███    ██  █████  ██████  ██ 
+██      ██   ██ ██      ██      ██    ██ ██     ██ ██      ████   ██ ██   ██ ██   ██ ██ 
+█████   ██████  █████   █████   ██    ██ ██  █  ██ █████   ██ ██  ██ ███████ ██████  ██ 
+██      ██   ██ ██      ██      ██ ▄▄ ██ ██ ███ ██ ██      ██  ██ ██ ██   ██ ██      ██ 
+██      ██   ██ ███████ ███████  ██████   ███ ███  ███████ ██   ████ ██   ██ ██      ██ 
+                                    ▀▀                                                    
+   API-прокси для Qwen 
+`);
+
     logInfo('Запуск сервера...');
 
     initHistoryDirectory();
@@ -134,10 +144,19 @@ async function startServer() {
             logInfo('Переименовать чат: PUT /api/chats/:chatId/rename');
             logInfo('Автоудаление чатов: POST /api/chats/cleanup');
             logInfo('======================================================');
+            logInfo('Доступно 18 моделей Qwen (через систему маппинга):');
+            logInfo('- Стандартные: qwen-max, qwen-plus, qwen-turbo и их latest-версии');
+            logInfo('- Coder: qwen-coder-plus, qwen2.5-coder-*b-instruct (0.5b - 32b)');
+            logInfo('- Визуальные: qwen-vl-max, qwen-vl-plus и их latest-версии');
+            logInfo('- Qwen 3: qwen3, qwen3-max, qwen3-plus');
+            logInfo('======================================================');
             logInfo('Формат JSON запроса на чат:');
             logInfo('{ "message": "текст сообщения", "model": "название модели (опционально)", "chatId": "ID чата (опционально)" }');
             logInfo('Пример запроса: { "message": "Привет, как дела?" }');
+            logInfo('Пример запроса с моделью: { "message": "Привет, как дела?", "model": "qwen-max" }');
             logInfo('Пример запроса с сохранением контекста: { "message": "Привет, как дела?", "chatId": "полученный_id_чата" }');
+            logInfo('======================================================');
+            logInfo('Поддержка OpenAI совместимого API: POST /api/chat/completions');
             logInfo('======================================================');
 
             getAvailableModelsFromFile();

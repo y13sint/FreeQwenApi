@@ -4,10 +4,36 @@ import { sendMessage, getAllModels } from './chat.js';
 import { getAuthenticationStatus } from '../browser/browser.js';
 import { checkAuthentication } from '../browser/auth.js';
 import { getBrowserContext } from '../browser/browser.js';
-import { getAllChats, loadHistory, createChat, deleteChat, chatExists, renameChat, deleteChatsAutomatically } from './chatHistory.js';
+import { getAllChats, loadHistory, createChat, deleteChat, chatExists, renameChat, deleteChatsAutomatically, saveHistory } from './chatHistory.js';
 import { logInfo, logError, logDebug } from '../logger/index.js';
+import { getMappedModel } from './modelMapping.js';
+import { getStsToken, uploadFileToQwen } from './fileUpload.js';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
+import crypto from 'crypto';
 
 const router = express.Router();
+
+// Настройка multer для загрузки файлов
+const storage = multer.diskStorage({
+    destination: function (req, file, cb) {
+        const uploadDir = path.join(process.cwd(), 'uploads');
+        if (!fs.existsSync(uploadDir)) {
+            fs.mkdirSync(uploadDir, { recursive: true });
+        }
+        cb(null, uploadDir);
+    },
+    filename: function (req, file, cb) {
+        const uniqueSuffix = Date.now() + '-' + crypto.randomBytes(8).toString('hex');
+        cb(null, uniqueSuffix + '-' + file.originalname);
+    }
+});
+
+const upload = multer({ 
+    storage: storage,
+    limits: { fileSize: 10 * 1024 * 1024 } // 10MB макс. размер
+});
 
 // Маршрут для автоудаления чатов 
 // (должен быть определен до маршрутов с параметрами, чтобы избежать конфликта с /:chatId)
@@ -16,7 +42,6 @@ router.post('/chats/cleanup', (req, res) => {
         logInfo(`Запрос на автоматическое удаление чатов: ${JSON.stringify(req.body)}`);
         const criteria = req.body || {};
 
-        // Валидация входных параметров
         if (criteria.olderThan && (typeof criteria.olderThan !== 'number' || criteria.olderThan <= 0)) {
             logError(`Некорректное значение olderThan: ${criteria.olderThan}`);
             return res.status(400).json({ error: 'Некорректное значение olderThan' });
@@ -80,13 +105,18 @@ router.post('/chat', async (req, res) => {
         if (chatId) {
             logInfo(`Используется chatId: ${chatId}`);
         }
+        
+        let mappedModel = model;
         if (model) {
-            logInfo(`Используется модель: ${model}`);
+            mappedModel = getMappedModel(model);
+            if (mappedModel !== model) {
+                logInfo(`Модель "${model}" заменена на "${mappedModel}"`);
+            }
+            logInfo(`Используется модель: ${mappedModel}`);
         }
 
-        const result = await sendMessage(messageContent, model, chatId);
+        const result = await sendMessage(messageContent, mappedModel, chatId);
 
-        // Проверяем наличие ответа и корректно логируем его
         if (result.choices && result.choices[0] && result.choices[0].message) {
             const responseLength = result.choices[0].message.content ? result.choices[0].message.content.length : 0;
             logInfo(`Ответ успешно сформирован для запроса, длина ответа: ${responseLength}`);
@@ -244,7 +274,6 @@ router.post('/analyze/network', (req, res) => {
 router.post('/chat/completions', async (req, res) => {
     try {
         const { messages, model, stream} = req.body;
-        const chatId = req.body.chatId;
 
         logInfo(`Получен OpenAI-совместимый запрос${stream ? ' (stream)' : ''}`);
 
@@ -253,6 +282,37 @@ router.post('/chat/completions', async (req, res) => {
             return res.status(400).json({ error: 'Сообщения не указаны' });
         }
 
+        const chatId = createChat("OpenAI API Chat");
+        logInfo(`Создан новый чат с ID: ${chatId} для запроса /chat/completions`);
+        
+        let historyTransferred = false;
+        try {
+            logInfo(`Перенос истории сообщений из запроса в чат ${chatId}`);
+            const chatData = loadHistory(chatId);
+            
+            for (const msg of messages) {
+                const timestamp = Math.floor(Date.now() / 1000);
+                const messageId = crypto.randomUUID();
+                
+                const formattedMessage = {
+                    id: messageId,
+                    role: msg.role,
+                    content: msg.content,
+                    timestamp: timestamp,
+                    chat_type: "t2t"
+                };
+                
+                chatData.messages.push(formattedMessage);
+                logDebug(`Добавлено сообщение с ролью "${msg.role}" в историю чата ${chatId}`);
+            }
+            
+            saveHistory(chatId, chatData);
+            historyTransferred = true;
+            logInfo(`История из ${messages.length} сообщений успешно перенесена в чат ${chatId}`);
+        } catch (error) {
+            logError(`Ошибка при переносе истории в чат ${chatId}`, error);
+        }
+        
         const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
         if (!lastUserMessage) {
             logError('В запросе нет сообщений от пользователя');
@@ -260,43 +320,48 @@ router.post('/chat/completions', async (req, res) => {
         }
 
         const messageContent = lastUserMessage.content;
+        
+        let mappedModel = model ? getMappedModel(model) : "qwen-max-latest";
+        if (model && mappedModel !== model) {
+            logInfo(`Модель "${model}" заменена на "${mappedModel}"`);
+        }
+        logInfo(`Используется модель: ${mappedModel}`);
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
-            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n');
+            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n');
 
             try {
-                const result = await sendMessage(messageContent, model, chatId);
+                const result = await sendMessage(messageContent, mappedModel, chatId);
 
                 if (result.error) {
-                    res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Error: ' + result.error + '"},"finish_reason":null}]}\n\n');
+                    res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Error: ' + result.error + '"},"finish_reason":null}]}\n\n');
                 } else if (result.choices && result.choices[0] && result.choices[0].message) {
                     const content = result.choices[0].message.content || '';
-
 
                     const chunkSize = 8;
                     for (let i = 0; i < content.length; i += chunkSize) {
                         const chunk = content.substring(i, i + chunkSize);
-                        res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"' + chunk.replace(/\n/g, "\\n").replace(/"/g, '\\"') + '"},"finish_reason":null}]}\n\n');
+                        res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"' + chunk.replace(/\n/g, "\\n").replace(/"/g, '\\"') + '"},"finish_reason":null}]}\n\n');
 
                         await new Promise(resolve => setTimeout(resolve, 10));
                     }
                 }
 
-                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n');
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n');
                 res.write('data: [DONE]\n\n');
                 res.end();
 
             } catch (error) {
                 logError('Ошибка при обработке потокового запроса', error);
-                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (model || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Internal server error"},"finish_reason":"stop"}]}\n\n');
+                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Internal server error"},"finish_reason":"stop"}]}\n\n');
                 res.write('data: [DONE]\n\n');
                 res.end();
             }
         } else {
-            const result = await sendMessage(messageContent, model, chatId);
+            const result = await sendMessage(messageContent, mappedModel, chatId);
 
             if (result.error) {
                 return res.status(500).json({
@@ -304,12 +369,11 @@ router.post('/chat/completions', async (req, res) => {
                 });
             }
 
-
             const openaiResponse = {
                 id: result.id || "chatcmpl-" + Date.now(),
                 object: "chat.completion",
                 created: Math.floor(Date.now() / 1000),
-                model: result.model || model || "qwen-max-latest",
+                model: result.model || mappedModel || "qwen-max-latest",
                 choices: result.choices || [{
                     index: 0,
                     message: {
@@ -330,6 +394,68 @@ router.post('/chat/completions', async (req, res) => {
     } catch (error) {
         logError('Ошибка при обработке запроса', error);
         res.status(500).json({ error: { message: 'Внутренняя ошибка сервера', type: "server_error" } });
+    }
+});
+
+// Новый маршрут для получения STS токена
+router.post('/files/getstsToken', async (req, res) => {
+    try {
+        logInfo(`Запрос на получение STS токена: ${JSON.stringify(req.body)}`);
+        
+        const fileInfo = req.body;
+        if (!fileInfo || !fileInfo.filename || !fileInfo.filesize || !fileInfo.filetype) {
+            logError('Некорректные данные о файле');
+            return res.status(400).json({ error: 'Некорректные данные о файле' });
+        }
+        
+        const stsToken = await getStsToken(fileInfo);
+        res.json(stsToken);
+    } catch (error) {
+        logError('Ошибка при получении STS токена', error);
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
+    }
+});
+
+// Маршрут для загрузки файла - работает
+router.post('/files/upload', upload.single('file'), async (req, res) => {
+    try {
+        if (!req.file) {
+            logError('Файл не был загружен');
+            return res.status(400).json({ error: 'Файл не был загружен' });
+        }
+        
+        logInfo(`Файл загружен на сервер: ${req.file.originalname} (${req.file.size} байт)`);
+        
+        // Загружаем файл в Qwen OSS хранилище
+        const result = await uploadFileToQwen(req.file.path);
+        
+        // Удаляем временный файл после успешной загрузки
+        fs.unlinkSync(req.file.path);
+        
+        if (result.success) {
+            logInfo(`Файл успешно загружен в OSS: ${result.fileName}`);
+            res.json({
+                success: true,
+                file: {
+                    name: result.fileName,
+                    url: result.url,
+                    size: req.file.size,
+                    type: req.file.mimetype
+                }
+            });
+        } else {
+            logError(`Ошибка при загрузке файла в OSS: ${result.error}`);
+            res.status(500).json({ error: 'Ошибка при загрузке файла' });
+        }
+    } catch (error) {
+        logError('Ошибка при загрузке файла', error);
+        
+        // Удаляем временный файл в случае ошибки
+        if (req.file && req.file.path && fs.existsSync(req.file.path)) {
+            fs.unlinkSync(req.file.path);
+        }
+        
+        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
 
