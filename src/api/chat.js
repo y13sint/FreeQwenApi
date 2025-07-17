@@ -367,21 +367,27 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
                 return { error: 'Требуется верификация. Браузер запущен в видимом режиме.', verification: true, chatId };
             }
 
+            // ----- Новая обработка истекшего токена / 401 Unauthorized -----
             if ((response.status === 401) || (response.errorBody && (response.errorBody.includes('Unauthorized') || response.errorBody.includes('Token has expired')))) {
-                console.log('Получен ответ 401 Unauthorized или сообщение о просроченном токене. Очищаем токен и перезапускаем авторизацию...');
+                console.log('Токен', tokenObj?.id, 'недействителен (401). Удаляем и пробуем другой.');
 
+                // Удаляем токен из пула
                 authToken = null;
-                saveAuthToken('');
-                setAuthenticationStatus(false);
                 if (tokenObj && tokenObj.id) {
-                    removeInvalidToken(tokenObj.id);
+                    const { markInvalid } = await import('./tokenManager.js');
+                    markInvalid(tokenObj.id);
                 }
 
+                // Есть ли ещё токены?
+                const { hasValidTokens } = await import('./tokenManager.js');
+                if (hasValidTokens()) {
+                    return await sendMessage(message, model, chatId, files); // повторяем с новым токеном
+                }
+
+                console.error('Не осталось валидных токенов. Останавливаю прокси.');
                 await pagePool.clear();
                 await shutdownBrowser();
-                await initBrowser(true);
-
-                return { error: 'Токен авторизации истёк. Пожалуйста, войдите заново в открывшемся браузере.', reauth: true, chatId };
+                process.exit(1);
             }
 
             if (response.errorBody && response.errorBody.includes('RateLimited')) {

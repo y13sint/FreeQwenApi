@@ -94,29 +94,50 @@ async function startServer() {
     // Меню управления аккаунтами перед запуском прокси
     while (true) {
         const tokens = loadTokens();
+        console.log('\nСписок аккаунтов:');
+        if (!tokens.length) {
+            console.log('  (пусто)');
+        } else {
+            tokens.forEach((t, i) => {
+                let status = '✅ OK';
+                const now = Date.now();
+                if (t.invalid) status = '❌ INVALID';
+                else if (t.resetAt && new Date(t.resetAt).getTime() > now) status = '⏳ WAIT';
+                console.log(`${String(i + 1).padStart(2, ' ')} | ${t.id} | ${status}`);
+            });
+        }
         console.log('\n=== Меню ===');
         console.log('1 - Добавить новый аккаунт');
-        console.log('2 - Запустить прокси');
-        console.log(`   (сейчас доступно аккаунтов: ${tokens.length})`);
-        const choice = await prompt('Ваш выбор (1/2): ');
+        console.log('2 - Перелогинить аккаунт с истекшим токеном');
+        console.log('3 - Запустить прокси (по умолчанию)');
+        console.log('4 - Удалить аккаунт');
+        let choice = await prompt('Ваш выбор (Enter = 3): ');
+        if (!choice) choice = '3';
         if (choice === '1') {
             await addAccountInteractive();
         } else if (choice === '2') {
-            if (!tokens.length) {
-                console.log('Добавьте хотя бы один аккаунт перед запуском прокси.');
+            const { reloginAccountInteractive } = await import('./src/utils/accountSetup.js');
+            await reloginAccountInteractive();
+        } else if (choice === '3') {
+            if (!tokens.length || !loadTokens().some(t => !t.invalid)) {
+                console.log('Нужен хотя бы один валидный аккаунт для запуска.');
                 continue;
             }
             break;
+        } else if (choice === '4') {
+            const { removeAccountInteractive } = await import('./src/utils/accountSetup.js');
+            await removeAccountInteractive();
         }
     }
 
-    
+//=====================================================================================================
     //const sim = await prompt('Смоделировать ошибку RateLimited для первого запроса? (y/N): ');
     //if (sim.toLowerCase() === 'y') {
-    //     global.simulateRateLimit = true;
+    //    global.simulateRateLimit = true;
     // }
+//=====================================================================================================
 
-    const browserInitialized = await initBrowser(false); // Запускаем в фоновом режиме
+    const browserInitialized = await initBrowser(false); 
     if (!browserInitialized) {
         logError('Не удалось инициализировать браузер. Завершение работы.');
         process.exit(1);

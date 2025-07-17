@@ -4,7 +4,7 @@ import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-let pointer = 0; 
+let pointer = 0;
 
 // Директория для хранения сессий и данных аккаунтов
 const SESSION_DIR = path.join(__dirname, '..', '..', 'session');
@@ -46,11 +46,17 @@ export function saveTokens(tokens) {
 export async function getAvailableToken() {
     const tokens = loadTokens();
     const now = Date.now();
-    const valid = tokens.filter(t => !t.resetAt || new Date(t.resetAt).getTime() <= now);
+    const valid = tokens.filter(t => (!t.resetAt || new Date(t.resetAt).getTime() <= now) && !t.invalid);
     if (!valid.length) return null;
     const token = valid[pointer % valid.length];
     pointer = (pointer + 1) % valid.length;
     return token;
+}
+
+export function hasValidTokens() {
+    const tokens = loadTokens();
+    const now = Date.now();
+    return tokens.some(t => (!t.resetAt || new Date(t.resetAt).getTime() <= now) && !t.invalid);
 }
 
 export function markRateLimited(id, hours = 24) {
@@ -63,8 +69,34 @@ export function markRateLimited(id, hours = 24) {
     }
 }
 
-export function removeInvalidToken(id) {
+export function removeToken(id) {
     const tokens = loadTokens();
     const filtered = tokens.filter(t => t.id !== id);
     saveTokens(filtered);
+}
+
+export { removeToken as removeInvalidToken };
+
+export function markInvalid(id) {
+    const tokens = loadTokens();
+    const idx = tokens.findIndex(t => t.id === id);
+    if (idx !== -1) {
+        tokens[idx].invalid = true;
+        saveTokens(tokens);
+    }
+}
+
+export function markValid(id, newToken) {
+    const tokens = loadTokens();
+    const idx = tokens.findIndex(t => t.id === id);
+    if (idx !== -1) {
+        tokens[idx].invalid = false;
+        tokens[idx].resetAt = null;
+        if (newToken) tokens[idx].token = newToken;
+        saveTokens(tokens);
+    }
+}
+
+export function listTokens() {
+    return loadTokens();
 } 
