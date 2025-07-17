@@ -8,7 +8,7 @@ let browserContext = null;
 
 export let isAuthenticated = false;
 
-export async function initBrowser(visibleMode = true) {
+export async function initBrowser(visibleMode = true, skipManualRestart = false) {
     if (!browserInstance) {
         console.log('Инициализация браузера...');
         try {
@@ -26,7 +26,7 @@ export async function initBrowser(visibleMode = true) {
             console.log('Браузер инициализирован успешно');
 
             if (visibleMode) {
-                await startManualAuthentication(browserContext);
+                await startManualAuthentication(browserContext, skipManualRestart);
             } else {
                 const sessionLoaded = await loadSession(browserContext);
                 if (sessionLoaded) {

@@ -2,7 +2,8 @@ import { getBrowserContext, getAuthenticationStatus, setAuthenticationStatus } f
 import { checkAuthentication } from '../browser/auth.js';
 import { checkVerification } from '../browser/auth.js';
 import { shutdownBrowser, initBrowser } from '../browser/browser.js';
-import { saveAuthToken, loadAuthToken } from '../browser/session.js';
+import { saveAuthToken } from '../browser/session.js';
+import { getAvailableToken, markRateLimited, removeInvalidToken } from './tokenManager.js';
 import { loadHistory, addUserMessage, addAssistantMessage, createChat, chatExists } from './chatHistory.js';
 import fs from 'fs';
 import path from 'path';
@@ -16,7 +17,7 @@ const CHAT_PAGE_URL = 'https://chat.qwen.ai/';
 
 const MODELS_FILE = path.join(__dirname, '..', 'AvaibleModels.txt');
 
-let authToken = loadAuthToken();
+let authToken = null;
 let availableModels = null;
 
 
@@ -70,7 +71,6 @@ export const pagePool = {
 };
 
 export async function extractAuthToken(context, forceRefresh = false) {
-    // Если токен уже есть и обновление не требуется, сразу возвращаем его
     if (authToken && !forceRefresh) {
         return authToken;
     }
@@ -79,7 +79,6 @@ export async function extractAuthToken(context, forceRefresh = false) {
         const page = await context.newPage();
         await page.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded' });
 
-        // Получаем текущий токен из localStorage браузера
         const newToken = await page.evaluate(() => localStorage.getItem('token'));
 
         await page.close();
@@ -158,14 +157,10 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
         console.log(`Создан новый чат с ID: ${chatId}`);
     }
 
-    // Проверка и обработка сообщений
     try {
         if (typeof message === 'string') {
-            // Если сообщение - это простая строка, добавляем ее как обычно
             addUserMessage(chatId, message);
         } else if (Array.isArray(message)) {
-            // Если сообщение - это массив (текст + изображения), добавляем его как составное сообщение
-            // Проверяем, что все элементы имеют корректную структуру
             const isValid = message.every(item =>
                 (item.type === 'text' && typeof item.text === 'string') ||
                 (item.type === 'image' && typeof item.image === 'string') ||
@@ -197,6 +192,12 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
     }
 
     console.log(`Используемая модель: "${model}"`);
+
+    let tokenObj = await getAvailableToken();
+    if (tokenObj && tokenObj.token) {
+        authToken = tokenObj.token;
+        console.log(`Используется аккаунт: ${tokenObj.id}`);
+    }
 
     const browserContext = getBrowserContext();
     if (!browserContext) {
@@ -243,7 +244,6 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
 
         const history = loadHistory(chatId);
 
-        // Получаем сообщения из нового формата истории
         const messages = Array.isArray(history)
             ? history.map(msg => ({
                 role: msg.role,
@@ -277,7 +277,7 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
 
         console.log(`Используем токен: ${authToken ? 'Токен существует' : 'Токен отсутствует'}`);
 
-        const response = await page.evaluate(async (data) => {
+        let response = await page.evaluate(async (data) => {
             try {
                 const token = data.token;
                 if (!token) {
@@ -313,6 +313,22 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
                 return { success: false, error: error.toString() };
             }
         }, evalData);
+
+        // --- TEST: симуляция ответа RateLimited ---
+        if (global.simulateRateLimit && !global.__rateLimitedTested) {
+            global.__rateLimitedTested = true;
+            response = {
+                success: false,
+                status: 429,
+                errorBody: JSON.stringify({
+                    code: 'RateLimited',
+                    detail: "You've reached the upper limit for today's usage.",
+                    template: 'You have reached the daily usage limit. Please wait {{num}} hours before trying again.',
+                    num: 4
+                })
+            };
+            console.log('*** Симуляция ответа RateLimited активирована ***');
+        }
 
         pagePool.releasePage(page);
         page = null;
@@ -351,21 +367,36 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
                 return { error: 'Требуется верификация. Браузер запущен в видимом режиме.', verification: true, chatId };
             }
 
-            // ----- Новая обработка истекшего токена / 401 Unauthorized -----
             if ((response.status === 401) || (response.errorBody && (response.errorBody.includes('Unauthorized') || response.errorBody.includes('Token has expired')))) {
                 console.log('Получен ответ 401 Unauthorized или сообщение о просроченном токене. Очищаем токен и перезапускаем авторизацию...');
 
-                // Очищаем сохранённый токен и помечаем отсутствие авторизации
                 authToken = null;
                 saveAuthToken('');
                 setAuthenticationStatus(false);
+                if (tokenObj && tokenObj.id) {
+                    removeInvalidToken(tokenObj.id);
+                }
 
-                // Перезапускаем браузер в видимом режиме для ручного входа
                 await pagePool.clear();
                 await shutdownBrowser();
                 await initBrowser(true);
 
                 return { error: 'Токен авторизации истёк. Пожалуйста, войдите заново в открывшемся браузере.', reauth: true, chatId };
+            }
+
+            if (response.errorBody && response.errorBody.includes('RateLimited')) {
+                try {
+                    const rateInfo = JSON.parse(response.errorBody);
+                    const hours = Number(rateInfo.num) || 24;
+                    if (tokenObj && tokenObj.id) {
+                        markRateLimited(tokenObj.id, hours);
+                        console.log(`Токен ${tokenObj.id} достиг лимита. Помечаем на ${hours}ч и пробуем другой токен...`);
+                    }
+                } catch (e) {
+                    console.error('Не удалось распарсить тело ошибки RateLimited:', e);
+                }
+                authToken = null;
+                return await sendMessage(message, model, chatId, files);
             }
 
             return { error: response.error || response.statusText, details: response.errorBody || 'Нет дополнительных деталей', chatId };

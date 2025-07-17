@@ -232,7 +232,6 @@ export function getAllChats() {
                 const chatId = file.replace('.json', '');
                 const chatData = loadHistory(chatId);
 
-                // Проверяем, был ли выполнен перевод формата - old 
                 if (chatData.wasConverted) {
                     convertedCount++;
                 }
@@ -293,7 +292,6 @@ export function deleteChatsAutomatically(criteria = {}) {
             chatsToDelete = chatsToDelete.filter(chat => chat.created < cutoffTime);
         }
 
-        // Фильтрация по количеству сообщений пользователя
         if (userMessageCountLessThan !== undefined) {
             const lowUserMsgChatsCount = chatsToDelete.filter(chat =>
                 chat.userMessageCount < userMessageCountLessThan).length;
@@ -302,7 +300,6 @@ export function deleteChatsAutomatically(criteria = {}) {
                 chat.userMessageCount < userMessageCountLessThan);
         }
 
-        // Фильтрация по общему количеству сообщений
         if (messageCountLessThan !== undefined) {
             const lowMsgChatsCount = chatsToDelete.filter(chat =>
                 chat.messageCount < messageCountLessThan).length;
@@ -311,15 +308,11 @@ export function deleteChatsAutomatically(criteria = {}) {
                 chat.messageCount < messageCountLessThan);
         }
 
-        // Удаление старых чатов, если их общее количество превышает maxChats
         if (maxChats && chats.length > maxChats) {
             logInfo(`Общее количество чатов (${chats.length}) превышает лимит (${maxChats}), удаляем старые чаты`);
-            // Сортировка по дате создания (от старых к новым)
             const sortedChats = [...chats].sort((a, b) => a.created - b.created);
-            // Получение самых старых чатов для удаления
             const oldestChats = sortedChats.slice(0, chats.length - maxChats);
 
-            // Добавление ID чатов, которые еще не в списке удаления
             oldestChats.forEach(chat => {
                 if (!chatsToDelete.some(c => c.id === chat.id)) {
                     chatsToDelete.push(chat);

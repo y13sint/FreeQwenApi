@@ -9,7 +9,8 @@ import { initBrowser, shutdownBrowser } from './src/browser/browser.js';
 import apiRoutes from './src/api/routes.js';
 import { getAvailableModelsFromFile } from './src/api/chat.js';
 import { initHistoryDirectory } from './src/api/chatHistory.js';
-import { hasSession } from './src/browser/session.js';
+import { loadTokens } from './src/api/tokenManager.js';
+import { interactiveAccountMenu, addAccountInteractive } from './src/utils/accountSetup.js';
 import { logHttpRequest, logInfo, logError, logWarn } from './src/logger/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -19,10 +20,12 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = 3264;
 
-const rl = readline.createInterface({
-    input: process.stdin,
-    output: process.stdout
-});
+function prompt(question) {
+    const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+    return new Promise(res => rl.question(question, ans => { rl.close(); res(ans.trim()); }));
+}
+
+let rl = null;
 
 // Middleware для логирования HTTP-запросов
 app.use(logHttpRequest);
@@ -70,37 +73,7 @@ async function handleShutdown() {
     await shutdownBrowser();
     logInfo('Завершение работы.');
 
-    if (rl) {
-        rl.close();
-    }
-
     process.exit(0);
-}
-
-function promptLaunchMode() {
-    return new Promise((resolve) => {
-        if (hasSession()) {
-            console.log('\n[НАЙДЕНА СОХРАНЕННАЯ СЕССИЯ]');
-            console.log('\nВыберите режим запуска:');
-            console.log('1 - Использовать сохраненную сессию (без повторной авторизации)');
-            console.log('2 - Запустить с новой авторизацией');
-
-            rl.question('\nВаш выбор (1/2, по умолчанию 1): ', (answer) => {
-                const useSavedSession = answer !== '2';
-
-                if (useSavedSession) {
-                    logInfo('\nЗапуск сервера с сохраненной сессией...\n');
-                } else {
-                    logInfo('\nЗапуск сервера с новой авторизацией...\n');
-                }
-
-                resolve(!useSavedSession);
-            });
-        } else {
-            logInfo('\nСохраненная сессия не найдена, выполняется запуск с новой авторизацией...\n');
-            resolve(true);
-        }
-    });
 }
 
 async function startServer() {
@@ -118,11 +91,32 @@ async function startServer() {
 
     initHistoryDirectory();
 
-    const visibleMode = await promptLaunchMode();
+    // Меню управления аккаунтами перед запуском прокси
+    while (true) {
+        const tokens = loadTokens();
+        console.log('\n=== Меню ===');
+        console.log('1 - Добавить новый аккаунт');
+        console.log('2 - Запустить прокси');
+        console.log(`   (сейчас доступно аккаунтов: ${tokens.length})`);
+        const choice = await prompt('Ваш выбор (1/2): ');
+        if (choice === '1') {
+            await addAccountInteractive();
+        } else if (choice === '2') {
+            if (!tokens.length) {
+                console.log('Добавьте хотя бы один аккаунт перед запуском прокси.');
+                continue;
+            }
+            break;
+        }
+    }
 
-    rl.close();
+    
+    //const sim = await prompt('Смоделировать ошибку RateLimited для первого запроса? (y/N): ');
+    //if (sim.toLowerCase() === 'y') {
+    //     global.simulateRateLimit = true;
+    // }
 
-    const browserInitialized = await initBrowser(visibleMode);
+    const browserInitialized = await initBrowser(false); // Запускаем в фоновом режиме
     if (!browserInitialized) {
         logError('Не удалось инициализировать браузер. Завершение работы.');
         process.exit(1);
@@ -176,10 +170,6 @@ async function startServer() {
 startServer().catch(async error => {
     logError('Ошибка при запуске сервера:', error);
     await shutdownBrowser();
-
-    if (rl) {
-        rl.close();
-    }
 
     process.exit(1);
 });

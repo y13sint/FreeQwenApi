@@ -118,7 +118,7 @@ export async function checkAuthentication(context) {
     }
 }
 
-export async function startManualAuthentication(context) {
+export async function startManualAuthentication(context, skipRestart = false) {
     try {
         const page = await context.newPage();
 
@@ -159,7 +159,9 @@ export async function startManualAuthentication(context) {
             console.log('======================================================');
 
             await page.close();
-            await restartBrowserInHeadlessMode();
+            if (!skipRestart) {
+                await restartBrowserInHeadlessMode();
+            }
             return true;
         } else {
             console.log('Предупреждение: Даже после подтверждения, система не обнаружила авторизацию.');
