@@ -180,6 +180,7 @@ POST http://localhost:3264/api/files/upload
 **请求格式：** `multipart/form-data`
 
 **参数：**
+
 - `file` - 图像文件（支持格式：jpg, jpeg, png, gif, webp）
 
 **使用 curl 的示例：**
@@ -360,6 +361,7 @@ curl -X POST http://localhost:3264/api/chat \
    - 点击 "Send"
 
    响应将包含图像 URL：
+
    ```json
    {
      "imageUrl": "https://cdn.qwenlm.ai/user-id/file-id_filename.jpg?key=..."
@@ -371,6 +373,7 @@ curl -X POST http://localhost:3264/api/chat \
    - 选择 "Body" 选项卡
    - 选择类型 "raw" 和格式 "JSON"
    - 粘贴以下 JSON，将 `图像URL` 替换为获取的 URL：
+
    ```json
    {
      "message": [
@@ -386,6 +389,7 @@ curl -X POST http://localhost:3264/api/chat \
      "model": "qwen3-235b-a22b"
    }
    ```
+
    - 点击 "Send"
 
 #### 使用 OpenAI 兼容端点
@@ -395,6 +399,7 @@ curl -X POST http://localhost:3264/api/chat \
    - 选择 "Body" 选项卡
    - 选择类型 "raw" 和格式 "JSON"
    - 粘贴以下 JSON，将 `图像URL` 替换为获取的 URL：
+
    ```json
    {
      "messages": [
@@ -415,6 +420,7 @@ curl -X POST http://localhost:3264/api/chat \
      "model": "qwen3-235b-a22b"
    }
    ```
+
    - 点击 "Send"
 
 2. **流式模式请求**：
@@ -427,7 +433,7 @@ curl -X POST http://localhost:3264/api/chat \
 
 系统会自动保存对话历史并在每个请求中发送到 Qwen API。这使模型能够在生成回答时考虑之前的消息。
 
-### 上下文工作流程：
+### 上下文工作流程
 
 1. **首次请求**（不指定 `chatId`）：
 
@@ -566,6 +572,7 @@ async function uploadAndAnalyzeImage(imagePath) {
 ```
 
 > **兼容性限制：**
+>
 > 1. 一些 OpenAI 特有的参数（如 `logprobs`、`functions` 等）不受支持。
 > 2. 流式传输速度可能与原始 OpenAI API 不同。
 
@@ -576,4 +583,4 @@ async function uploadAndAnalyzeImage(imagePath) {
 - 代理通过无头浏览器模拟与 Qwen 网页界面的交互
 - 自动管理会话和授权
 - 通过浏览器页面池优化性能
-- 支持自动保存和恢复授权状态 
+- 支持自动保存和恢复授权状态
