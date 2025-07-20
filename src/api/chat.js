@@ -16,10 +16,11 @@ const CHAT_API_URL = 'https://chat.qwen.ai/api/chat/completions';
 const CHAT_PAGE_URL = 'https://chat.qwen.ai/';
 
 const MODELS_FILE = path.join(__dirname, '..', 'AvaibleModels.txt');
+const AUTH_KEYS_FILE = path.join(__dirname, '..', 'Authorization.txt');
 
 let authToken = null;
 let availableModels = null;
-
+let authKeys = null;
 
 export const pagePool = {
     pages: [],
@@ -121,6 +122,24 @@ export function getAvailableModelsFromFile() {
     }
 }
 
+function getAuthKeysFromFile() {
+    try {
+         if (!fs.existsSync(AUTH_KEYS_FILE)) {
+            console.error(`Файл с ключами авторизации не найден: ${AUTH_KEYS_FILE}`);
+            return [];
+        }
+
+        const fileContent = fs.readFileSync(AUTH_KEYS_FILE, 'utf8');
+        const keys = fileContent.split('\n')  
+            .map(line => line.trim())  
+            .filter(line => line && !line.startsWith('#'));
+
+        return keys;
+    } catch (error) {
+        console.error('Ошибка при чтении файла с ключами авторизации:', error);
+        return [];
+    }
+}
 
 export function isValidModel(modelName) {
     if (!availableModels) {
@@ -144,6 +163,14 @@ export function getAllModels() {
             description: `Модель ${model}`
         }))
     };
+}
+
+export function getApiKeys() {
+    if (!authKeys) {
+        authKeys = getAuthKeysFromFile();
+    }
+
+    return authKeys;
 }
 
 export async function sendMessage(message, model = "qwen-max-latest", chatId = null, files = null) {
@@ -432,4 +459,4 @@ export function getAuthToken() {
 
 export async function listModels(browserContext) {
     return await getAvailableModels(browserContext);
-} 
+}
