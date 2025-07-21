@@ -124,14 +124,20 @@ export function getAvailableModelsFromFile() {
 
 function getAuthKeysFromFile() {
     try {
-         if (!fs.existsSync(AUTH_KEYS_FILE)) {
-            console.error(`Файл с ключами авторизации не найден: ${AUTH_KEYS_FILE}`);
+        if (!fs.existsSync(AUTH_KEYS_FILE)) {
+            const template = `# Файл API-ключей для прокси\n# --------------------------------------------\n# В этом файле перечислены токены, которые\n# прокси будет считать «действительными».\n# Один ключ — одна строка без пробелов.\n#\n# 1) Хотите ОТКЛЮЧИТЬ авторизацию целиком?\n#    Оставьте файл пустым — сервер перестанет\n#    проверять заголовок Authorization.\n#\n# 2) Хотите разрешить доступ нескольким людям?\n#    Впишите каждый ключ в отдельной строке:\n#      d35ab3e1-a6f9-4d...\n#      f2b1cd9c-1b2e-4a...\n#\n# Пустые строки и строки, начинающиеся с «#»,\n# игнорируются.`;
+            try {
+                fs.writeFileSync(AUTH_KEYS_FILE, template, { encoding: 'utf8', flag: 'wx' });
+                console.log(`Создан шаблон файла ключей: ${AUTH_KEYS_FILE}`);
+            } catch (e) {
+                console.error('Не удалось создать шаблон Authorization.txt:', e);
+            }
             return [];
         }
 
         const fileContent = fs.readFileSync(AUTH_KEYS_FILE, 'utf8');
-        const keys = fileContent.split('\n')  
-            .map(line => line.trim())  
+        const keys = fileContent.split('\n')
+            .map(line => line.trim())
             .filter(line => line && !line.startsWith('#'));
 
         return keys;

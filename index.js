@@ -7,7 +7,7 @@ import readline from 'readline';
 
 import { initBrowser, shutdownBrowser } from './src/browser/browser.js';
 import apiRoutes from './src/api/routes.js';
-import { getAvailableModelsFromFile } from './src/api/chat.js';
+import { getAvailableModelsFromFile, getApiKeys } from './src/api/chat.js';
 import { initHistoryDirectory } from './src/api/chatHistory.js';
 import { loadTokens } from './src/api/tokenManager.js';
 import { interactiveAccountMenu, addAccountInteractive } from './src/utils/accountSetup.js';
@@ -173,6 +173,9 @@ async function startServer() {
             logInfo('======================================================');
             logInfo('Поддержка OpenAI совместимого API: POST /api/chat/completions');
             logInfo('======================================================');
+
+     
+            getApiKeys();
 
             getAvailableModelsFromFile();
         });
