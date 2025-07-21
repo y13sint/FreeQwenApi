@@ -1,6 +1,6 @@
 // routes.js - Модуль с маршрутами для API
 import express from 'express';
-import { sendMessage, getAllModels } from './chat.js';
+import { sendMessage, getAllModels, getApiKeys } from './chat.js';
 import { getAuthenticationStatus } from '../browser/browser.js';
 import { checkAuthentication } from '../browser/auth.js';
 import { getBrowserContext } from '../browser/browser.js';
@@ -34,6 +34,33 @@ const upload = multer({
     storage: storage,
     limits: { fileSize: 10 * 1024 * 1024 } // 10MB макс. размер
 });
+
+function authMiddleware(req, res, next) {
+    const apiKeys = getApiKeys();
+
+    if (apiKeys.length === 0) {
+        return next();
+    }
+
+    const authHeader = req.headers.authorization;
+    const apiKeyHeaderPrefix = 'Bearer ';
+
+    if (!authHeader || !authHeader.startsWith(apiKeyHeaderPrefix)) {
+        logError('Отсутствует или некорректный заголовок авторизации');
+        return res.status(401).json({ error: 'Требуется авторизация' });
+    }
+
+    const token = authHeader.substring(apiKeyHeaderPrefix.length).trim();
+    
+    if (!apiKeys.includes(token)) {
+        logError('Предоставлен недействительный API ключ');
+        return res.status(401).json({ error: 'Недействительный токен' });
+    }
+
+    next();
+}
+
+router.use(authMiddleware);
 
 // Маршрут для автоудаления чатов 
 // (должен быть определен до маршрутов с параметрами, чтобы избежать конфликта с /:chatId)
