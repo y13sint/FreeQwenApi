@@ -1,4 +1,4 @@
-# Qwen API Proxy 🐉
+# Qwen API Proxy 
 
 > Короткая инструкция. Полное руководство см. в [docs/README.md](docs/README.md)
 
