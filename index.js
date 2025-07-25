@@ -159,9 +159,9 @@ async function startServer() {
             logInfo('Переименовать чат: PUT /api/chats/:chatId/rename');
             logInfo('Автоудаление чатов: POST /api/chats/cleanup');
             logInfo('======================================================');
-            logInfo('Доступно 18 моделей Qwen (через систему маппинга):');
+            logInfo('Доступно 19 моделей Qwen (через систему маппинга):');
             logInfo('- Стандартные: qwen-max, qwen-plus, qwen-turbo и их latest-версии');
-            logInfo('- Coder: qwen-coder-plus, qwen2.5-coder-*b-instruct (0.5b - 32b)');
+            logInfo('- Coder: qwen3-coder-plus, qwen2.5-coder-*b-instruct (0.5b - 32b)');
             logInfo('- Визуальные: qwen-vl-max, qwen-vl-plus и их latest-версии');
             logInfo('- Qwen 3: qwen3, qwen3-max, qwen3-plus');
             logInfo('======================================================');
@@ -174,7 +174,7 @@ async function startServer() {
             logInfo('Поддержка OpenAI совместимого API: POST /api/chat/completions');
             logInfo('======================================================');
 
-     
+
             getApiKeys();
 
             getAvailableModelsFromFile();
