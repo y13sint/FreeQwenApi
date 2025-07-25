@@ -163,14 +163,14 @@ router.get('/models', async (req, res) => {
         logInfo('Запрос на получение списка моделей');
         const modelsRaw = getAllModels();
 
-        // Формируем OpenAI-совместимый ответ
+        
         const openAiModels = {
             object: 'list',
             data: modelsRaw.models.map(m => ({
-                id: m.id || m.name || m, // поддержка разных форматов
+                id: m.id || m.name || m, 
                 object: 'model',
-                created: 0, // время неизвестно, ставим 0
-                owned_by: 'openai',
+                created: 0, 
+                owned_by: 'proxy',
                 permission: []
             }))
         };
