@@ -30,7 +30,7 @@ const storage = multer.diskStorage({
     }
 });
 
-const upload = multer({ 
+const upload = multer({
     storage: storage,
     limits: { fileSize: 10 * 1024 * 1024 } // 10MB макс. размер
 });
@@ -51,7 +51,7 @@ function authMiddleware(req, res, next) {
     }
 
     const token = authHeader.substring(apiKeyHeaderPrefix.length).trim();
-    
+
     if (!apiKeys.includes(token)) {
         logError('Предоставлен недействительный API ключ');
         return res.status(401).json({ error: 'Недействительный токен' });
@@ -132,7 +132,7 @@ router.post('/chat', async (req, res) => {
         if (chatId) {
             logInfo(`Используется chatId: ${chatId}`);
         }
-        
+
         let mappedModel = model;
         if (model) {
             mappedModel = getMappedModel(model);
@@ -161,9 +161,22 @@ router.post('/chat', async (req, res) => {
 router.get('/models', async (req, res) => {
     try {
         logInfo('Запрос на получение списка моделей');
-        const models = getAllModels();
-        logInfo(`Возвращено ${models.models.length} моделей`);
-        res.json(models);
+        const modelsRaw = getAllModels();
+
+        // Формируем OpenAI-совместимый ответ
+        const openAiModels = {
+            object: 'list',
+            data: modelsRaw.models.map(m => ({
+                id: m.id || m.name || m, // поддержка разных форматов
+                object: 'model',
+                created: 0, // время неизвестно, ставим 0
+                owned_by: 'openai',
+                permission: []
+            }))
+        };
+
+        logInfo(`Возвращено ${openAiModels.data.length} моделей (OpenAI формат)`);
+        res.json(openAiModels);
     } catch (error) {
         logError('Ошибка при получении списка моделей', error);
         res.status(500).json({ error: 'Внутренняя ошибка сервера' });
@@ -300,7 +313,7 @@ router.post('/analyze/network', (req, res) => {
 
 router.post('/chat/completions', async (req, res) => {
     try {
-        const { messages, model, stream} = req.body;
+        const { messages, model, stream } = req.body;
 
         logInfo(`Получен OpenAI-совместимый запрос${stream ? ' (stream)' : ''}`);
 
@@ -311,16 +324,16 @@ router.post('/chat/completions', async (req, res) => {
 
         const chatId = createChat("OpenAI API Chat");
         logInfo(`Создан новый чат с ID: ${chatId} для запроса /chat/completions`);
-        
+
         let historyTransferred = false;
         try {
             logInfo(`Перенос истории сообщений из запроса в чат ${chatId}`);
             const chatData = loadHistory(chatId);
-            
+
             for (const msg of messages) {
                 const timestamp = Math.floor(Date.now() / 1000);
                 const messageId = crypto.randomUUID();
-                
+
                 const formattedMessage = {
                     id: messageId,
                     role: msg.role,
@@ -328,18 +341,18 @@ router.post('/chat/completions', async (req, res) => {
                     timestamp: timestamp,
                     chat_type: "t2t"
                 };
-                
+
                 chatData.messages.push(formattedMessage);
                 logDebug(`Добавлено сообщение с ролью "${msg.role}" в историю чата ${chatId}`);
             }
-            
+
             saveHistory(chatId, chatData);
             historyTransferred = true;
             logInfo(`История из ${messages.length} сообщений успешно перенесена в чат ${chatId}`);
         } catch (error) {
             logError(`Ошибка при переносе истории в чат ${chatId}`, error);
         }
-        
+
         const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
         if (!lastUserMessage) {
             logError('В запросе нет сообщений от пользователя');
@@ -347,7 +360,7 @@ router.post('/chat/completions', async (req, res) => {
         }
 
         const messageContent = lastUserMessage.content;
-        
+
         let mappedModel = model ? getMappedModel(model) : "qwen-max-latest";
         if (model && mappedModel !== model) {
             logInfo(`Модель "${model}" заменена на "${mappedModel}"`);
@@ -428,13 +441,13 @@ router.post('/chat/completions', async (req, res) => {
 router.post('/files/getstsToken', async (req, res) => {
     try {
         logInfo(`Запрос на получение STS токена: ${JSON.stringify(req.body)}`);
-        
+
         const fileInfo = req.body;
         if (!fileInfo || !fileInfo.filename || !fileInfo.filesize || !fileInfo.filetype) {
             logError('Некорректные данные о файле');
             return res.status(400).json({ error: 'Некорректные данные о файле' });
         }
-        
+
         const stsToken = await getStsToken(fileInfo);
         res.json(stsToken);
     } catch (error) {
@@ -450,15 +463,15 @@ router.post('/files/upload', upload.single('file'), async (req, res) => {
             logError('Файл не был загружен');
             return res.status(400).json({ error: 'Файл не был загружен' });
         }
-        
+
         logInfo(`Файл загружен на сервер: ${req.file.originalname} (${req.file.size} байт)`);
-        
+
         // Загружаем файл в Qwen OSS хранилище
         const result = await uploadFileToQwen(req.file.path);
-        
+
         // Удаляем временный файл после успешной загрузки
         fs.unlinkSync(req.file.path);
-        
+
         if (result.success) {
             logInfo(`Файл успешно загружен в OSS: ${result.fileName}`);
             res.json({
@@ -476,12 +489,12 @@ router.post('/files/upload', upload.single('file'), async (req, res) => {
         }
     } catch (error) {
         logError('Ошибка при загрузке файла', error);
-        
+
         // Удаляем временный файл в случае ошибки
         if (req.file && req.file.path && fs.existsSync(req.file.path)) {
             fs.unlinkSync(req.file.path);
         }
-        
+
         res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
