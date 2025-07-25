@@ -61,6 +61,12 @@ function authMiddleware(req, res, next) {
 }
 
 router.use(authMiddleware);
+router.use((req, res, next) => {
+    req.url = req.url
+        .replace(/\/v[12](?=\/|$)/g, '')   
+        .replace(/\/+/g, '/');              
+    next();
+});
 
 // Маршрут для автоудаления чатов 
 // (должен быть определен до маршрутов с параметрами, чтобы избежать конфликта с /:chatId)
@@ -163,14 +169,14 @@ router.get('/models', async (req, res) => {
         logInfo('Запрос на получение списка моделей');
         const modelsRaw = getAllModels();
 
-        
+
         const openAiModels = {
             object: 'list',
             data: modelsRaw.models.map(m => ({
-                id: m.id || m.name || m, 
+                id: m.id || m.name || m,
                 object: 'model',
-                created: 0, 
-                owned_by: 'proxy',
+                created: 0,
+                owned_by: 'openai',
                 permission: []
             }))
         };
@@ -182,6 +188,7 @@ router.get('/models', async (req, res) => {
         res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
+
 
 router.get('/status', async (req, res) => {
     try {
