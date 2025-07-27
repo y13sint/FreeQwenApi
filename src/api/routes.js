@@ -12,6 +12,8 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import crypto from 'crypto';
+import { listTokens, markInvalid, markRateLimited, markValid } from './tokenManager.js';
+import { testToken } from './chat.js';
 
 const router = express.Router();
 
@@ -63,8 +65,8 @@ function authMiddleware(req, res, next) {
 router.use(authMiddleware);
 router.use((req, res, next) => {
     req.url = req.url
-        .replace(/\/v[12](?=\/|$)/g, '')   
-        .replace(/\/+/g, '/');              
+        .replace(/\/v[12](?=\/|$)/g, '')
+        .replace(/\/+/g, '/');
     next();
 });
 
@@ -193,17 +195,45 @@ router.get('/models', async (req, res) => {
 router.get('/status', async (req, res) => {
     try {
         logInfo('Запрос статуса авторизации');
+
+
+        const tokens = listTokens();
+        const accounts = await Promise.all(tokens.map(async t => {
+            const accInfo = { id: t.id, status: 'UNKNOWN', resetAt: t.resetAt || null };
+
+            if (t.resetAt) {
+                const resetTime = new Date(t.resetAt).getTime();
+                if (resetTime > Date.now()) {
+                    accInfo.status = 'WAIT';
+                    return accInfo;
+                }
+            }
+
+            const testResult = await testToken(t.token);
+            if (testResult === 'OK') {
+                accInfo.status = 'OK';
+                if (t.invalid || t.resetAt) markValid(t.id);
+            } else if (testResult === 'RATELIMIT') {
+                accInfo.status = 'WAIT';
+                markRateLimited(t.id, 24);
+            } else if (testResult === 'UNAUTHORIZED') {
+                accInfo.status = 'INVALID';
+                if (!t.invalid) markInvalid(t.id);
+            } else {
+                accInfo.status = 'ERROR';
+            }
+            return accInfo;
+        }));
+
         const browserContext = getBrowserContext();
         if (!browserContext) {
             logError('Браузер не инициализирован');
-            return res.json({ authenticated: false, message: 'Браузер не инициализирован' });
+            return res.json({ authenticated: false, message: 'Браузер не инициализирован', accounts });
         }
 
         if (getAuthenticationStatus()) {
-            logInfo('Статус авторизации: активна (сохраненная сессия)');
             return res.json({
-                authenticated: true,
-                message: 'Авторизация активна (используется сохраненная сессия)'
+                accounts
             });
         }
 
@@ -213,7 +243,8 @@ router.get('/status', async (req, res) => {
 
         res.json({
             authenticated: isAuthenticated,
-            message: isAuthenticated ? 'Авторизация активна' : 'Требуется авторизация'
+            message: isAuthenticated ? 'Авторизация активна' : 'Требуется авторизация',
+            accounts
         });
     } catch (error) {
         logError('Ошибка при проверке статуса авторизации', error);

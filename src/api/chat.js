@@ -466,3 +466,53 @@ export function getAuthToken() {
 export async function listModels(browserContext) {
     return await getAvailableModels(browserContext);
 }
+
+export async function testToken(token) {
+    const browserContext = getBrowserContext();
+    if (!browserContext) return 'ERROR';
+
+    let page;
+    try {
+        page = await browserContext.newPage();
+        await page.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded' });
+
+        const evalData = {
+            apiUrl: CHAT_API_URL,
+            token,
+            payload: {
+                chat_type: 't2t',
+                messages: [{ role: 'user', content: 'ping', chat_type: 't2t' }],
+                model: 'qwen-max-latest',
+                stream: false
+            }
+        };
+
+        const result = await page.evaluate(async (data) => {
+            try {
+                const res = await fetch(data.apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${data.token}`
+                    },
+                    body: JSON.stringify(data.payload)
+                });
+                return { ok: res.ok, status: res.status };
+            } catch (e) {
+                return { ok: false, status: 0, error: e.toString() };
+            }
+        }, evalData);
+
+        if (result.ok || result.status === 400) return 'OK';
+        if (result.status === 401 || result.status === 403) return 'UNAUTHORIZED';
+        if (result.status === 429) return 'RATELIMIT';
+        return 'ERROR';
+    } catch (e) {
+        console.error('testToken error:', e);
+        return 'ERROR';
+    } finally {
+        if (page) {
+            try { await page.close(); } catch { }
+        }
+    }
+}
