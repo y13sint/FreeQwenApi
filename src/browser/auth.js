@@ -33,7 +33,7 @@ export async function checkAuthentication(context) {
         const page = await context.newPage();
 
         console.log('Проверка авторизации...');
-        await page.goto(AUTH_URL);
+        await page.goto(AUTH_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForLoadState('domcontentloaded');
 
         await page.waitForTimeout(2000);
@@ -137,7 +137,7 @@ export async function startManualAuthentication(context, skipRestart = false) {
         await promptUser('После успешной авторизации нажмите ENTER для продолжения...');
         console.log('Пользователь подтвердил завершение авторизации. Подождите...');
 
-        await page.goto(AUTH_URL);
+        await page.goto(AUTH_URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
         await page.waitForLoadState('domcontentloaded');
         await page.waitForTimeout(2000);
 
