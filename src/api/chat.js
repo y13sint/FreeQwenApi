@@ -192,7 +192,8 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
     }
 
     try {
-        if (typeof message === 'string') {
+        if (message === null || message === undefined) {
+        } else if (typeof message === 'string') {
             addUserMessage(chatId, message);
         } else if (Array.isArray(message)) {
             const isValid = message.every(item =>

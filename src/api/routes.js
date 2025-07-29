@@ -412,7 +412,7 @@ router.post('/chat/completions', async (req, res) => {
             res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n');
 
             try {
-                const result = await sendMessage(messageContent, mappedModel, chatId);
+                const result = await sendMessage(null, mappedModel, chatId);
 
                 if (result.error) {
                     res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Error: ' + result.error + '"},"finish_reason":null}]}\n\n');
@@ -439,7 +439,7 @@ router.post('/chat/completions', async (req, res) => {
                 res.end();
             }
         } else {
-            const result = await sendMessage(messageContent, mappedModel, chatId, null, tools, tool_choice);
+            const result = await sendMessage(null, mappedModel, chatId, null, tools, tool_choice);
 
             if (result.error) {
                 return res.status(500).json({
