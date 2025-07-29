@@ -190,7 +190,7 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
         chatId = createChat();
         console.log(`Создан новый чат с ID: ${chatId}`);
     }
-
+ 
     try {
         if (message === null || message === undefined) {
         } else if (typeof message === 'string') {
