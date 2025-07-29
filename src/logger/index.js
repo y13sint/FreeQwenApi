@@ -33,26 +33,28 @@ const fileFormat = combine(
     })
 );
 
-// Определяем уровни логирования с добавлением уровня http
+
 const customLevels = {
     levels: {
         error: 0,
         warn: 1,
         info: 2,
         http: 3,
-        debug: 4
+        debug: 4,
+        raw: 5
     },
     colors: {
         error: 'red',
         warn: 'yellow',
         info: 'green',
         http: 'cyan',
-        debug: 'blue'
+        debug: 'blue',
+        raw: 'magenta'
     }
 };
 
 // Определяем уровень логирования на основе окружения
-const level = process.env.NODE_ENV === 'production' ? 'info' : 'debug';
+const level = 'raw';
 
 // Создаем инстанс логгера
 const logger = winston.createLogger({
@@ -77,6 +79,13 @@ const logger = winston.createLogger({
         new winston.transports.File({
             filename: path.join(LOG_DIR, 'error.log'),
             level: 'error',
+            maxsize: 5242880, // 5MB
+            maxFiles: 5
+        }),
+        // Файл для сырых ответов нейросети
+        new winston.transports.File({
+            filename: path.join(LOG_DIR, 'raw-responses.log'),
+            level: 'raw',
             maxsize: 5242880, // 5MB
             maxFiles: 5
         }),
@@ -119,6 +128,7 @@ export const logError = (message, error) => {
 };
 export const logWarn = (message) => logger.warn(message);
 export const logDebug = (message) => logger.debug(message);
+export const logRaw = (message) => logger.raw(message);
 export const logHttp = (message) => logger.http(message);
 
 export default {
@@ -127,5 +137,6 @@ export default {
     logError,
     logWarn,
     logDebug,
+    logRaw,
     logHttp
 }; 

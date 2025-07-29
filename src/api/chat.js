@@ -8,6 +8,7 @@ import { loadHistory, addUserMessage, addAssistantMessage, createChat, chatExist
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { logRaw } from '../logger/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -376,6 +377,8 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
         page = null;
 
         if (response.success) {
+            // Логируем сырой ответ от модели
+            logRaw(JSON.stringify(response.data));
             console.log('Ответ получен успешно');
 
             const assistantContent = response.data.choices && response.data.choices[0]?.message?.content || '';
@@ -389,6 +392,8 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
 
             return response.data;
         } else {
+            // Логируем ошибочный сырой ответ
+            logRaw(JSON.stringify(response));
             console.error('Ошибка при получении ответа:', response.error || response.statusText);
 
             if (response.errorBody) {
