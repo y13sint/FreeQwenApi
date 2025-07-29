@@ -179,7 +179,7 @@ export function getApiKeys() {
     return authKeys;
 }
 
-export async function sendMessage(message, model = "qwen-max-latest", chatId = null, files = null) {
+export async function sendMessage(message, model = "qwen-max-latest", chatId = null, files = null, tools = null, toolChoice = null) {
 
     if (!availableModels) {
         availableModels = getAvailableModelsFromFile();
@@ -295,6 +295,15 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
             model: model,
             stream: false
         };
+
+        // Проброс спецификации инструментов Cursor (если есть)
+        if (tools) {
+            payload.tools = tools;
+        }
+
+        if (toolChoice) {
+            payload.tool_choice = toolChoice;
+        }
 
         if (files && Array.isArray(files) && files.length > 0) {
             payload.files = files;

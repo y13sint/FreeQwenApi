@@ -351,7 +351,7 @@ router.post('/analyze/network', (req, res) => {
 
 router.post('/chat/completions', async (req, res) => {
     try {
-        const { messages, model, stream } = req.body;
+        const { messages, model, stream, tools, tool_choice } = req.body;
 
         logInfo(`Получен OpenAI-совместимый запрос${stream ? ' (stream)' : ''}`);
 
@@ -439,7 +439,7 @@ router.post('/chat/completions', async (req, res) => {
                 res.end();
             }
         } else {
-            const result = await sendMessage(messageContent, mappedModel, chatId);
+            const result = await sendMessage(messageContent, mappedModel, chatId, null, tools, tool_choice);
 
             if (result.error) {
                 return res.status(500).json({
