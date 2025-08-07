@@ -351,7 +351,7 @@ router.post('/analyze/network', (req, res) => {
 
 router.post('/chat/completions', async (req, res) => {
     try {
-        const { messages, model, stream, tools, tool_choice } = req.body;
+        const { messages, model, stream, tools, functions, tool_choice } = req.body;
 
         logInfo(`Получен OpenAI-совместимый запрос${stream ? ' (stream)' : ''}`);
 
@@ -409,37 +409,83 @@ router.post('/chat/completions', async (req, res) => {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
-            res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"role":"assistant"},"finish_reason":null}]}\n\n');
+
+            const writeSse = (payload) => {
+                res.write('data: ' + JSON.stringify(payload) + '\n\n');
+            };
+
+            writeSse({
+                id: 'chatcmpl-stream',
+                object: 'chat.completion.chunk',
+                created: Math.floor(Date.now() / 1000),
+                model: mappedModel || 'qwen-max-latest',
+                choices: [
+                    { index: 0, delta: { role: 'assistant' }, finish_reason: null }
+                ]
+            });
 
             try {
                 const result = await sendMessage(null, mappedModel, chatId);
 
                 if (result.error) {
-                    res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Error: ' + result.error + '"},"finish_reason":null}]}\n\n');
+                    writeSse({
+                        id: 'chatcmpl-stream',
+                        object: 'chat.completion.chunk',
+                        created: Math.floor(Date.now() / 1000),
+                        model: mappedModel || 'qwen-max-latest',
+                        choices: [
+                            { index: 0, delta: { content: `Error: ${result.error}` }, finish_reason: null }
+                        ]
+                    });
                 } else if (result.choices && result.choices[0] && result.choices[0].message) {
                     const content = result.choices[0].message.content || '';
 
                     const chunkSize = 8;
                     for (let i = 0; i < content.length; i += chunkSize) {
                         const chunk = content.substring(i, i + chunkSize);
-                        res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"' + chunk.replace(/\n/g, "\\n").replace(/"/g, '\\"') + '"},"finish_reason":null}]}\n\n');
+                        writeSse({
+                            id: 'chatcmpl-stream',
+                            object: 'chat.completion.chunk',
+                            created: Math.floor(Date.now() / 1000),
+                            model: mappedModel || 'qwen-max-latest',
+                            choices: [
+                                { index: 0, delta: { content: chunk }, finish_reason: null }
+                            ]
+                        });
 
                         await new Promise(resolve => setTimeout(resolve, 10));
                     }
                 }
 
-                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}\n\n');
+                writeSse({
+                    id: 'chatcmpl-stream',
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(Date.now() / 1000),
+                    model: mappedModel || 'qwen-max-latest',
+                    choices: [
+                        { index: 0, delta: {}, finish_reason: 'stop' }
+                    ]
+                });
                 res.write('data: [DONE]\n\n');
                 res.end();
 
             } catch (error) {
                 logError('Ошибка при обработке потокового запроса', error);
-                res.write('data: {"id":"chatcmpl-stream","object":"chat.completion.chunk","created":' + Math.floor(Date.now() / 1000) + ',"model":"' + (mappedModel || "qwen-max-latest") + '","choices":[{"index":0,"delta":{"content":"Internal server error"},"finish_reason":"stop"}]}\n\n');
+                writeSse({
+                    id: 'chatcmpl-stream',
+                    object: 'chat.completion.chunk',
+                    created: Math.floor(Date.now() / 1000),
+                    model: mappedModel || 'qwen-max-latest',
+                    choices: [
+                        { index: 0, delta: { content: 'Internal server error' }, finish_reason: 'stop' }
+                    ]
+                });
                 res.write('data: [DONE]\n\n');
                 res.end();
             }
         } else {
-            const result = await sendMessage(null, mappedModel, chatId, null, tools, tool_choice);
+            const combinedTools = tools || (functions ? functions.map(fn => ({ type: 'function', function: fn })) : null);
+            const result = await sendMessage(null, mappedModel, chatId, null, combinedTools, tool_choice);
 
             if (result.error) {
                 return res.status(500).json({

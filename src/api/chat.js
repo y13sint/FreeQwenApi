@@ -190,7 +190,7 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
         chatId = createChat();
         console.log(`Создан новый чат с ID: ${chatId}`);
     }
- 
+
     try {
         if (message === null || message === undefined) {
         } else if (typeof message === 'string') {
@@ -291,11 +291,31 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
                 chat_type: "t2t"
             }));
 
+        // === Интеграция описаний инструментов ===
+        // Qwen реагирует, когда сигнатуры переданы:
+        // 1) В payload.tools  (OpenAI-style)
+        // 2) В system-промте внутри тега <tools>…</tools>
+        // Причём system-промт должен быть ПЕРВЫМ. Поэтому, если в истории
+        // уже есть сообщение role:system, расширяем его; иначе — вставляем
+        // новый в начало.
+        if (tools && Array.isArray(tools) && tools.length > 0) {
+            // Формируем XML-блок <tools>...</tools> с JSON-описанием функций (совместимо с шаблоном qwen2tools)
+            const toolsXml = `<tools>\n${tools.map(t => JSON.stringify(t.function || t)).join('\n')}\n</tools>`;
+            // Вставляем системное сообщение в самое начало истории, чтобы модель увидела определения
+            if (messages.length > 0 && messages[0].role === 'system') {
+                messages[0].content += `\n\nYou are provided with function signatures within <tools></tools> XML tags. Here are the available tools:\n${toolsXml}`;
+            } else {
+                messages.unshift({ role: 'system', content: `You are provided with function signatures within <tools></tools> XML tags. Here are the available tools:\n${toolsXml}` });
+            }
+        }
+
         const payload = {
             chat_type: "t2t",
             messages: messages,
             model: model,
-            stream: false
+            stream: false,
+            // Для Qwen параметр tools обязателен, даже если мы продублировали его в System
+            ...(tools ? { tools } : {})
         };
 
         // Проброс спецификации инструментов Cursor (если есть)
@@ -303,14 +323,19 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
             payload.tools = tools;
         }
 
-        if (toolChoice) {
-            payload.tool_choice = toolChoice;
+        // Если явно не указано, даём модели право выбирать инструменты
+        if (!toolChoice) {
+            toolChoice = "auto";
         }
+        payload.tool_choice = toolChoice;
+        // Просим Qwen вернуть структурированный JSON, чтобы tool_calls гарантированно пришли
+        payload.response_format = { type: "json_object" };
 
         if (files && Array.isArray(files) && files.length > 0) {
             payload.files = files;
         }
 
+        console.log('=== PAYLOAD ===\n' + JSON.stringify(payload, null, 2));
         console.log(`Отправляемый запрос с историей из ${messages.length} сообщений`);
 
         const evalData = {
@@ -342,7 +367,8 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
                     try {
                         return { success: true, data: JSON.parse(resultText) };
                     } catch (e) {
-                        return { success: false, error: 'Не удалось распарсить ответ как JSON', html: resultText };
+                        console.error('=== RAW RESPONSE ===\n' + resultText);
+                        return { success: false, error: 'Не удалось распарсить ответ как JSON', raw: resultText };
                     }
                 } else {
                     const errorBody = await response.text();
