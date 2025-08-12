@@ -440,9 +440,9 @@ router.post('/chat/completions', async (req, res) => {
                 } else if (result.choices && result.choices[0] && result.choices[0].message) {
                     const content = String(result.choices[0].message.content || '');
 
-            
+
                     const codePoints = Array.from(content);
-                    const chunkSize = 512; 
+                    const chunkSize = 16;
                     for (let i = 0; i < codePoints.length; i += chunkSize) {
                         const chunk = codePoints.slice(i, i + chunkSize).join('');
                         writeSse({
