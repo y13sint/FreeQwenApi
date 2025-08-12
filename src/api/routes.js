@@ -438,11 +438,13 @@ router.post('/chat/completions', async (req, res) => {
                         ]
                     });
                 } else if (result.choices && result.choices[0] && result.choices[0].message) {
-                    const content = result.choices[0].message.content || '';
+                    const content = String(result.choices[0].message.content || '');
 
-                    const chunkSize = 8;
-                    for (let i = 0; i < content.length; i += chunkSize) {
-                        const chunk = content.substring(i, i + chunkSize);
+            
+                    const codePoints = Array.from(content);
+                    const chunkSize = 512; 
+                    for (let i = 0; i < codePoints.length; i += chunkSize) {
+                        const chunk = codePoints.slice(i, i + chunkSize).join('');
                         writeSse({
                             id: 'chatcmpl-stream',
                             object: 'chat.completion.chunk',
@@ -453,7 +455,7 @@ router.post('/chat/completions', async (req, res) => {
                             ]
                         });
 
-                        await new Promise(resolve => setTimeout(resolve, 10));
+                        await new Promise(resolve => setTimeout(resolve, 5));
                     }
                 }
 
