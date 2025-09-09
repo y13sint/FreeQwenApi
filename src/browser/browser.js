@@ -1,4 +1,4 @@
-import { chromium } from 'playwright';
+import { firefox } from 'playwright';
 import { saveSession, loadSession, hasSession, saveAuthToken } from './session.js';
 import { checkAuthentication, startManualAuthentication } from './auth.js';
 import { clearPagePool, getAuthToken } from '../api/chat.js';
@@ -12,13 +12,13 @@ export async function initBrowser(visibleMode = true, skipManualRestart = false)
     if (!browserInstance) {
         console.log('Инициализация браузера...');
         try {
-            browserInstance = await chromium.launch({
+            browserInstance = await firefox.launch({
                 headless: !visibleMode,
                 slowMo: visibleMode ? 50 : 0,
             });
 
             browserContext = await browserInstance.newContext({
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/133.0.0.0 Safari/537.36',
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0',
                 viewport: { width: 1280, height: 800 },
                 deviceScaleFactor: 1,
             });
