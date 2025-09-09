@@ -1,5 +1,5 @@
 import { chromium } from 'playwright-extra';
-import stealth from 'playwright-extra-plugin-stealth';
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 import { saveSession, loadSession, hasSession, saveAuthToken } from './session.js';
 import { checkAuthentication, startManualAuthentication } from './auth.js';
 import { clearPagePool, getAuthToken } from '../api/chat.js';
@@ -13,7 +13,7 @@ export async function initBrowser(visibleMode = true, skipManualRestart = false)
     if (!browserInstance) {
         console.log('Инициализация браузера...');
         try {
-            chromium.use(stealth());
+            chromium.use(StealthPlugin());
             browserInstance = await chromium.launch({
                 headless: !visibleMode,
                 slowMo: visibleMode ? 50 : 0,
