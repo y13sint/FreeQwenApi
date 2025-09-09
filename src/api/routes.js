@@ -391,13 +391,6 @@ router.post('/chat/completions', async (req, res) => {
             logError(`Ошибка при переносе истории в чат ${chatId}`, error);
         }
 
-        const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
-        if (!lastUserMessage) {
-            logError('В запросе нет сообщений от пользователя');
-            return res.status(400).json({ error: 'В запросе нет сообщений от пользователя' });
-        }
-
-        const messageContent = lastUserMessage.content;
 
         let mappedModel = model ? getMappedModel(model) : "qwen-max-latest";
         if (model && mappedModel !== model) {
