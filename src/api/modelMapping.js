@@ -31,7 +31,13 @@ export const MODEL_MAPPING = {
     "qwen3": "qwen3-235b-a22b",
     "qwen-3": "qwen3-235b-a22b",
     "qwen3-max": "qwen3-235b-a22b",
-    "qwen3-plus": "qwen3-30b-a3b"
+    "qwen3-plus": "qwen3-30b-a3b",
+
+    "qwen-plus-2025-09-11": "qwen-plus-2025-09-11",
+    "Qwen3-Next-80B-A3Bб": "qwen-plus-2025-09-11",
+
+    "qwen3-max-preview": "qwen3-max-preview",
+    "Qwen3-Max-Preview": "qwen3-max-preview"
 };
 
 /**

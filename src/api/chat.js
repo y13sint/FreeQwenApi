@@ -33,7 +33,7 @@ export const pagePool = {
         }
 
         const newPage = await context.newPage();
-        await newPage.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded' });
+        await newPage.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
 
         if (!authToken) {
             try {
@@ -79,7 +79,7 @@ export async function extractAuthToken(context, forceRefresh = false) {
 
     try {
         const page = await context.newPage();
-        await page.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded' });
+        await page.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: 120000 });
 
         const newToken = await page.evaluate(() => localStorage.getItem('token'));
 
@@ -262,7 +262,7 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
 
         const verificationNeeded = await checkVerification(page);
         if (verificationNeeded) {
-            await page.reload({ waitUntil: 'domcontentloaded' });
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: 120000 });
         }
 
         if (!authToken) {

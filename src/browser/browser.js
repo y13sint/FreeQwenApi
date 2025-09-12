@@ -23,6 +23,11 @@ export async function initBrowser(visibleMode = true, skipManualRestart = false)
                 deviceScaleFactor: 1,
             });
 
+            try {
+                browserContext.setDefaultNavigationTimeout?.(120000);
+                browserContext.setDefaultTimeout?.(120000);
+            } catch { }
+
             console.log('Браузер инициализирован успешно');
 
             if (visibleMode) {
