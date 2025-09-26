@@ -1,0 +1,17 @@
+services:
+  qwen-proxy:
+    build: .
+    image: qwen-api-proxy:latest
+    container_name: qwen-proxy
+    environment:
+      - NODE_ENV=production
+      - PORT=${PORT:-3264}
+      - HOST=0.0.0.0
+      - SKIP_ACCOUNT_MENU=true
+    ports:
+      - "${PORT:-3264}:3264"
+    volumes:
+      - ./session:/app/session
+      - ./logs:/app/logs
+      - ./uploads:/app/uploads
+    restart: unless-stopped

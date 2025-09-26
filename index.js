@@ -10,7 +10,7 @@ import apiRoutes from './src/api/routes.js';
 import { getAvailableModelsFromFile, getApiKeys } from './src/api/chat.js';
 import { initHistoryDirectory } from './src/api/chatHistory.js';
 import { loadTokens } from './src/api/tokenManager.js';
-import { interactiveAccountMenu, addAccountInteractive } from './src/utils/accountSetup.js';
+import { addAccountInteractive } from './src/utils/accountSetup.js';
 import { logHttpRequest, logInfo, logError, logWarn } from './src/logger/index.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -18,14 +18,44 @@ const __dirname = path.dirname(__filename);
 
 
 const app = express();
-const port = 3264;
+
+const DEFAULT_PORT = 3264;
+const port = Number.parseInt(process.env.PORT ?? DEFAULT_PORT, 10);
+const host = process.env.HOST || '0.0.0.0';
+
+if (Number.isNaN(port) || port <= 0 || port > 65535) {
+    throw new Error(`Некорректное значение переменной PORT: ${process.env.PORT}`);
+}
+
+const skipAccountMenu = toBoolean(process.env.SKIP_ACCOUNT_MENU) || toBoolean(process.env.NON_INTERACTIVE);
 
 function prompt(question) {
     const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
     return new Promise(res => rl.question(question, ans => { rl.close(); res(ans.trim()); }));
 }
 
-let rl = null;
+function toBoolean(value) {
+    if (typeof value !== 'string') return false;
+    return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
+function ensureNonInteractiveTokens() {
+    const tokens = loadTokens();
+    if (!tokens.length) {
+        logError('Не найдено ни одного аккаунта. Запустите скрипт авторизации перед запуском сервера.');
+        process.exit(1);
+    }
+
+    const now = Date.now();
+    const validTokens = tokens.filter(t => (!t.resetAt || new Date(t.resetAt).getTime() <= now) && !t.invalid);
+
+    if (!validTokens.length) {
+        logError('Все аккаунты недоступны. Перезапустите авторизацию перед запуском сервера.');
+        process.exit(1);
+    }
+
+    logInfo(`Автоматический запуск: обнаружено ${tokens.length} аккаунтов, из них ${validTokens.length} активны.`);
+}
 
 // Middleware для логирования HTTP-запросов
 app.use(logHttpRequest);
@@ -91,43 +121,54 @@ async function startServer() {
 
     initHistoryDirectory();
 
-    // Меню управления аккаунтами перед запуском прокси
-    while (true) {
-        const tokens = loadTokens();
-        console.log('\nСписок аккаунтов:');
-        if (!tokens.length) {
-            console.log('  (пусто)');
-        } else {
-            tokens.forEach((t, i) => {
-                let status = '✅ OK';
-                const now = Date.now();
-                if (t.invalid) status = '❌ INVALID';
-                else if (t.resetAt && new Date(t.resetAt).getTime() > now) status = '⏳ WAIT';
-                console.log(`${String(i + 1).padStart(2, ' ')} | ${t.id} | ${status}`);
-            });
-        }
-        console.log('\n=== Меню ===');
-        console.log('1 - Добавить новый аккаунт');
-        console.log('2 - Перелогинить аккаунт с истекшим токеном');
-        console.log('3 - Запустить прокси (по умолчанию)');
-        console.log('4 - Удалить аккаунт');
-        let choice = await prompt('Ваш выбор (Enter = 3): ');
-        if (!choice) choice = '3';
-        if (choice === '1') {
-            await addAccountInteractive();
-        } else if (choice === '2') {
-            const { reloginAccountInteractive } = await import('./src/utils/accountSetup.js');
-            await reloginAccountInteractive();
-        } else if (choice === '3') {
-            if (!tokens.length || !loadTokens().some(t => !t.invalid)) {
-                console.log('Нужен хотя бы один валидный аккаунт для запуска.');
-                continue;
+    if (!skipAccountMenu) {
+        // Меню управления аккаунтами перед запуском прокси
+        while (true) {
+            const tokens = loadTokens();
+            console.log('\nСписок аккаунтов:');
+            if (!tokens.length) {
+                console.log('  (пусто)');
+            } else {
+                tokens.forEach((token, i) => {
+                    const now = Date.now();
+                    const isInvalid = token.invalid === true;
+                    const isWaiting = Boolean(token.resetAt && new Date(token.resetAt).getTime() > now);
+                    const statusCode = isInvalid ? 0 : isWaiting ? 1 : 2;
+                    const statusLabel = isInvalid ? '❌ Недействителен' : isWaiting ? '⏳ Ожидание сброса' : '✅ OK';
+                    console.log(`${String(i + 1).padStart(2, ' ')} | ${token.id} | ${statusLabel} (${statusCode})`);
+                });
             }
-            break;
-        } else if (choice === '4') {
-            const { removeAccountInteractive } = await import('./src/utils/accountSetup.js');
-            await removeAccountInteractive();
+            console.log('\n=== Меню ===');
+            console.log('1 - Добавить новый аккаунт');
+            console.log('2 - Перелогинить аккаунт с истекшим токеном');
+            console.log('3 - Запустить прокси (по умолчанию)');
+            console.log('4 - Удалить аккаунт');
+            let choice = await prompt('Ваш выбор (Enter = 3): ');
+            if (!choice) choice = '3';
+            if (choice === '1') {
+                await addAccountInteractive();
+            } else if (choice === '2') {
+                const { reloginAccountInteractive } = await import('./src/utils/accountSetup.js');
+                await reloginAccountInteractive();
+            } else if (choice === '3') {
+                const hasValidToken = tokens.some(token => {
+                    if (token.invalid) return false;
+                    if (!token.resetAt) return true;
+                    return new Date(token.resetAt).getTime() <= Date.now();
+                });
+
+                if (!tokens.length || !hasValidToken) {
+                    console.log('Нужен хотя бы один валидный аккаунт для запуска.');
+                    continue;
+                }
+                break;
+            } else if (choice === '4') {
+                const { removeAccountInteractive } = await import('./src/utils/accountSetup.js');
+                await removeAccountInteractive();
+            }
         }
+    } else {
+        ensureNonInteractiveTokens();
     }
 
     //=====================================================================================================
@@ -144,9 +185,10 @@ async function startServer() {
     }
 
     try {
-        app.listen(port, () => {
-            logInfo(`Сервер запущен на порту ${port}`);
-            logInfo(`API доступен по адресу: http://localhost:${port}/api`);
+        app.listen(port, host, () => {
+            const displayHost = host === '0.0.0.0' ? 'localhost' : host;
+            logInfo(`Сервер запущен на ${host}:${port}`);
+            logInfo(`API доступен по адресу: http://${displayHost}:${port}/api`);
             logInfo('Для проверки статуса авторизации: GET /api/status');
             logInfo('Для отправки сообщения: POST /api/chat');
             logInfo('Для получения списка моделей: GET /api/models');
@@ -163,7 +205,7 @@ async function startServer() {
             logInfo('- Стандартные: qwen-max, qwen-plus, qwen-turbo и их latest-версии');
             logInfo('- Coder: qwen3-coder-plus, qwen2.5-coder-*b-instruct (0.5b - 32b)');
             logInfo('- Визуальные: qwen-vl-max, qwen-vl-plus и их latest-версии');
-            logInfo('- Qwen 3: qwen3, qwen3-max, qwen3-plus');
+            logInfo('- Qwen 3: qwen3, qwen3-max, qwen3-plus, qwen3-omni-flash');
             logInfo('======================================================');
             logInfo('Формат JSON запроса на чат:');
             logInfo('{ "message": "текст сообщения", "model": "название модели (опционально)", "chatId": "ID чата (опционально)" }');
