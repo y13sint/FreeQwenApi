@@ -14,3 +14,4 @@ qwen2.5-72b-instruct
 qwen3-coder-plus
 qwen-plus-2025-09-11
 qwen3-max-preview
+qwen3-omni-flash
