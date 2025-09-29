@@ -16,7 +16,8 @@
         "example:direct": "node examples/direct-api/fetch-example.js",
         "example:axios": "node examples/direct-api/axios-example.js",
         "example:chat-management": "node examples/direct-api/chat-management.js",
-        "example:file-upload": "node examples/file-upload/upload-example.js"
+        "example:file-upload": "node examples/file-upload/upload-example.js",
+        "auth": "node scripts/auth.js"
     },
     "dependencies": {
         "ali-oss": "^6.23.0",
