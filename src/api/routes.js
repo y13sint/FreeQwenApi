@@ -75,9 +75,16 @@ router.post('/chat', async (req, res) => {
 
         // Поддержка как message, так и messages для совместимости
         let messageContent = message;
+        let systemMessage = null;
 
         // Если указан параметр messages (множественное число), используем его в приоритете
         if (messages && Array.isArray(messages)) {
+            // Извлекаем system message если есть
+            const systemMsg = messages.find(msg => msg.role === 'system');
+            if (systemMsg) {
+                systemMessage = systemMsg.content;
+            }
+
             // Преобразуем формат messages в формат сообщения, понятный нашему прокси
             if (messages.length > 0) {
                 const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
@@ -97,6 +104,9 @@ router.post('/chat', async (req, res) => {
         }
 
         logInfo(`Получен запрос: ${typeof messageContent === 'string' ? messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : '') : 'Составное сообщение'}`);
+        if (systemMessage) {
+            logInfo(`System message: ${systemMessage.substring(0, 50)}${systemMessage.length > 50 ? '...' : ''}`);
+        }
         if (chatId) {
             logInfo(`Используется chatId: ${chatId}, parentId: ${parentId || 'null'}`);
         }
@@ -110,7 +120,7 @@ router.post('/chat', async (req, res) => {
         }
         logInfo(`Используется модель: ${mappedModel}`);
 
-        const result = await sendMessage(messageContent, mappedModel, chatId, parentId);
+        const result = await sendMessage(messageContent, mappedModel, chatId, parentId, null, null, null, systemMessage);
 
         if (result.choices && result.choices[0] && result.choices[0].message) {
             const responseLength = result.choices[0].message.content ? result.choices[0].message.content.length : 0;
@@ -253,6 +263,10 @@ router.post('/chat/completions', async (req, res) => {
             return res.status(400).json({ error: 'Сообщения не указаны' });
         }
 
+        // Извлекаем system message если есть
+        const systemMsg = messages.find(msg => msg.role === 'system');
+        const systemMessage = systemMsg ? systemMsg.content : null;
+
         const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
         if (!lastUserMessage) {
             logError('В запросе нет сообщений от пользователя');
@@ -266,6 +280,10 @@ router.post('/chat/completions', async (req, res) => {
             logInfo(`Модель "${model}" заменена на "${mappedModel}"`);
         }
         logInfo(`Используется модель: ${mappedModel}`);
+
+        if (systemMessage) {
+            logInfo(`System message: ${systemMessage.substring(0, 50)}${systemMessage.length > 50 ? '...' : ''}`);
+        }
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -288,7 +306,7 @@ router.post('/chat/completions', async (req, res) => {
 
             try {
                 const combinedTools = tools || (functions ? functions.map(fn => ({ type: 'function', function: fn })) : null);
-                const result = await sendMessage(messageContent, mappedModel, chatId, parentId, null, combinedTools, tool_choice);
+                const result = await sendMessage(messageContent, mappedModel, chatId, parentId, null, combinedTools, tool_choice, systemMessage);
 
                 if (result.error) {
                     writeSse({
@@ -349,7 +367,7 @@ router.post('/chat/completions', async (req, res) => {
             }
         } else {
             const combinedTools = tools || (functions ? functions.map(fn => ({ type: 'function', function: fn })) : null);
-            const result = await sendMessage(messageContent, mappedModel, chatId, parentId, null, combinedTools, tool_choice);
+            const result = await sendMessage(messageContent, mappedModel, chatId, parentId, null, combinedTools, tool_choice, systemMessage);
 
             if (result.error) {
                 return res.status(500).json({

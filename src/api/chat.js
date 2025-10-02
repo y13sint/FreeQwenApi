@@ -181,7 +181,7 @@ export function getApiKeys() {
     return authKeys;
 }
 
-export async function sendMessage(message, model = "qwen-max-latest", chatId = null, parentId = null, files = null, tools = null, toolChoice = null) {
+export async function sendMessage(message, model = "qwen-max-latest", chatId = null, parentId = null, files = null, tools = null, toolChoice = null, systemMessage = null) {
 
     if (!availableModels) {
         availableModels = getAvailableModelsFromFile();
@@ -326,6 +326,12 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
             parent_id: parentId,
             timestamp: Math.floor(Date.now() / 1000)
         };
+
+        // Добавляем system message если есть
+        if (systemMessage) {
+            payload.system_message = systemMessage;
+            console.log(`System message: ${systemMessage.substring(0, 100)}${systemMessage.length > 100 ? '...' : ''}`);
+        }
 
         // Добавляем tools если есть
         if (tools && Array.isArray(tools) && tools.length > 0) {
