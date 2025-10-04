@@ -4,16 +4,17 @@ import { checkVerification } from '../browser/auth.js';
 import { shutdownBrowser, initBrowser } from '../browser/browser.js';
 import { saveAuthToken } from '../browser/session.js';
 import { getAvailableToken, markRateLimited, removeInvalidToken } from './tokenManager.js';
-import { loadHistory, addUserMessage, addAssistantMessage, createChat, chatExists } from './chatHistory.js';
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { logRaw } from '../logger/index.js';
+import crypto from 'crypto';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const CHAT_API_URL = 'https://chat.qwen.ai/api/chat/completions';
+const CHAT_API_URL_V2 = 'https://chat.qwen.ai/api/v2/chat/completions';
+const CREATE_CHAT_URL = 'https://chat.qwen.ai/api/v2/chats/new';
 const CHAT_PAGE_URL = 'https://chat.qwen.ai/';
 
 const MODELS_FILE = path.join(__dirname, '..', 'AvaibleModels.txt');
@@ -180,21 +181,30 @@ export function getApiKeys() {
     return authKeys;
 }
 
-export async function sendMessage(message, model = "qwen-max-latest", chatId = null, files = null, tools = null, toolChoice = null) {
+export async function sendMessage(message, model = "qwen-max-latest", chatId = null, parentId = null, files = null, tools = null, toolChoice = null, systemMessage = null) {
 
     if (!availableModels) {
         availableModels = getAvailableModelsFromFile();
     }
 
-    if (!chatId || !chatExists(chatId)) {
-        chatId = createChat();
-        console.log(`Создан новый чат с ID: ${chatId}`);
+    // Создаём новый чат, если не передан
+    if (!chatId) {
+        const newChatResult = await createChatV2(model);
+        if (newChatResult.error) {
+            return { error: 'Не удалось создать чат: ' + newChatResult.error };
+        }
+        chatId = newChatResult.chatId;
+        console.log(`Создан новый чат v2 с ID: ${chatId}`);
     }
 
+    // Валидация сообщения
+    let messageContent = message;
     try {
         if (message === null || message === undefined) {
+            console.error('Сообщение пустое');
+            return { error: 'Сообщение не может быть пустым', chatId };
         } else if (typeof message === 'string') {
-            addUserMessage(chatId, message);
+            messageContent = message;
         } else if (Array.isArray(message)) {
             const isValid = message.every(item =>
                 (item.type === 'text' && typeof item.text === 'string') ||
@@ -207,7 +217,7 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
                 return { error: 'Некорректная структура составного сообщения', chatId };
             }
 
-            addUserMessage(chatId, message);
+            messageContent = message;
         } else {
             console.error('Неподдерживаемый формат сообщения:', message);
             return { error: 'Неподдерживаемый формат сообщения', chatId };
@@ -275,77 +285,74 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
             }
         }
 
-        console.log('Отправка запроса к API...');
+        console.log('Отправка запроса к API v2...');
 
-        const history = loadHistory(chatId);
-
-        const messages = Array.isArray(history)
-            ? history.map(msg => ({
-                role: msg.role,
-                content: msg.content,
-                chat_type: "t2t"
-            }))
-            : (history.messages || []).map(msg => ({
-                role: msg.role,
-                content: msg.content,
-                chat_type: "t2t"
-            }));
-
-        // === Интеграция описаний инструментов ===
-        // Qwen реагирует, когда сигнатуры переданы:
-        // 1) В payload.tools  (OpenAI-style)
-        // 2) В system-промте внутри тега <tools>…</tools>
-        // Причём system-промт должен быть ПЕРВЫМ. Поэтому, если в истории
-        // уже есть сообщение role:system, расширяем его; иначе — вставляем
-        // новый в начало.
-        if (tools && Array.isArray(tools) && tools.length > 0) {
-            // Формируем XML-блок <tools>...</tools> с JSON-описанием функций (совместимо с шаблоном qwen2tools)
-            const toolsXml = `<tools>\n${tools.map(t => JSON.stringify(t.function || t)).join('\n')}\n</tools>`;
-            // Вставляем системное сообщение в самое начало истории, чтобы модель увидела определения
-            if (messages.length > 0 && messages[0].role === 'system') {
-                messages[0].content += `\n\nYou are provided with function signatures within <tools></tools> XML tags. Here are the available tools:\n${toolsXml}`;
-            } else {
-                messages.unshift({ role: 'system', content: `You are provided with function signatures within <tools></tools> XML tags. Here are the available tools:\n${toolsXml}` });
-            }
-        }
-
-        const payload = {
+        // Формируем новое сообщение для v2 API
+        const userMessageId = crypto.randomUUID();
+        const assistantChildId = crypto.randomUUID();
+        
+        const newMessage = {
+            fid: userMessageId,
+            parentId: parentId,
+            parent_id: parentId,
+            role: "user",
+            content: messageContent,
             chat_type: "t2t",
-            messages: messages,
-            model: model,
-            stream: false,
-            // Для Qwen параметр tools обязателен, даже если мы продублировали его в System
-            ...(tools ? { tools } : {})
+            sub_chat_type: "t2t",
+            timestamp: Math.floor(Date.now() / 1000),
+            user_action: "chat",
+            models: [model],
+            files: files || [],
+            childrenIds: [assistantChildId],
+            extra: {
+                meta: {
+                    subChatType: "t2t"
+                }
+            },
+            feature_config: {
+                thinking_enabled: false,
+                output_schema: "phase"
+            }
         };
 
-        // Проброс спецификации инструментов Cursor (если есть)
-        if (tools) {
+        // Формируем payload для v2 API
+        const payload = {
+            stream: true,
+            incremental_output: true,
+            chat_id: chatId,
+            chat_mode: "normal",
+            messages: [newMessage],
+            model: model,
+            parent_id: parentId,
+            timestamp: Math.floor(Date.now() / 1000)
+        };
+
+        // Добавляем system message если есть
+        if (systemMessage) {
+            payload.system_message = systemMessage;
+            console.log(`System message: ${systemMessage.substring(0, 100)}${systemMessage.length > 100 ? '...' : ''}`);
+        }
+
+        // Добавляем tools если есть
+        if (tools && Array.isArray(tools) && tools.length > 0) {
             payload.tools = tools;
+            payload.tool_choice = toolChoice || "auto";
         }
 
-        // Если явно не указано, даём модели право выбирать инструменты
-        if (!toolChoice) {
-            toolChoice = "auto";
-        }
-        payload.tool_choice = toolChoice;
-        // Просим Qwen вернуть структурированный JSON, чтобы tool_calls гарантированно пришли
-        payload.response_format = { type: "json_object" };
+        console.log('=== PAYLOAD V2 ===\n' + JSON.stringify(payload, null, 2));
+        console.log(`Отправка сообщения в чат ${chatId} с parent_id: ${parentId || 'null'}`);
 
-        if (files && Array.isArray(files) && files.length > 0) {
-            payload.files = files;
-        }
-
-        console.log('=== PAYLOAD ===\n' + JSON.stringify(payload, null, 2));
-        console.log(`Отправляемый запрос с историей из ${messages.length} сообщений`);
-
+        const apiUrl = `${CHAT_API_URL_V2}?chat_id=${chatId}`;
         const evalData = {
-            apiUrl: CHAT_API_URL,
+            apiUrl: apiUrl,
             payload: payload,
             token: authToken
         };
 
         console.log(`Используем токен: ${authToken ? 'Токен существует' : 'Токен отсутствует'}`);
+        console.log(`API URL: ${apiUrl}`);
 
+        // Выполняем запрос через браузер и парсим SSE
         let response = await page.evaluate(async (data) => {
             try {
                 const token = data.token;
@@ -357,19 +364,87 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${token}`
+                        'Authorization': `Bearer ${token}`,
+                        'Accept': '*/*'
                     },
                     body: JSON.stringify(data.payload)
                 });
 
                 if (response.ok) {
-                    const resultText = await response.text();
-                    try {
-                        return { success: true, data: JSON.parse(resultText) };
-                    } catch (e) {
-                        console.error('=== RAW RESPONSE ===\n' + resultText);
-                        return { success: false, error: 'Не удалось распарсить ответ как JSON', raw: resultText };
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let fullContent = '';
+                    let responseId = null;
+                    let usage = null;
+                    let finished = false;
+
+                    while (!finished) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop() || '';
+
+                        for (const line of lines) {
+                            if (!line.trim() || !line.startsWith('data: ')) continue;
+                            
+                            const jsonStr = line.substring(6).trim();
+                            if (!jsonStr) continue;
+
+                            try {
+                                const chunk = JSON.parse(jsonStr);
+                                
+                                // Первый чанк с метаданными
+                                if (chunk['response.created']) {
+                                    responseId = chunk['response.created'].response_id;
+                                }
+                                
+                                // Чанки с контентом
+                                if (chunk.choices && chunk.choices[0]) {
+                                    const delta = chunk.choices[0].delta;
+                                    if (delta && delta.content) {
+                                        fullContent += delta.content;
+                                    }
+                                    if (delta && delta.status === 'finished') {
+                                        finished = true;
+                                    }
+                                }
+                                
+                                // Обновляем usage
+                                if (chunk.usage) {
+                                    usage = chunk.usage;
+                                }
+                            } catch (e) {
+                                // Игнорируем ошибки парсинга отдельных чанков
+                            }
+                        }
                     }
+
+                    return {
+                        success: true,
+                        data: {
+                            id: responseId || 'chatcmpl-' + Date.now(),
+                            object: 'chat.completion',
+                            created: Math.floor(Date.now() / 1000),
+                            model: data.payload.model,
+                            choices: [{
+                                index: 0,
+                                message: {
+                                    role: 'assistant',
+                                    content: fullContent
+                                },
+                                finish_reason: 'stop'
+                            }],
+                            usage: usage || {
+                                prompt_tokens: 0,
+                                completion_tokens: 0,
+                                total_tokens: 0
+                            },
+                            response_id: responseId
+                        }
+                    };
                 } else {
                     const errorBody = await response.text();
                     return {
@@ -408,13 +483,9 @@ export async function sendMessage(message, model = "qwen-max-latest", chatId = n
             logRaw(JSON.stringify(response.data));
             console.log('Ответ получен успешно');
 
-            const assistantContent = response.data.choices && response.data.choices[0]?.message?.content || '';
-            const responseInfo = response.data.usage || {};
-
-            addAssistantMessage(chatId, assistantContent, responseInfo);
-
-
+            // Добавляем метаданные для клиента
             response.data.chatId = chatId;
+            response.data.parentId = response.data.response_id; // Для следующего сообщения
             response.data.id = response.data.id || "chatcmpl-" + Date.now();
 
             return response.data;
@@ -506,6 +577,101 @@ export function getAuthToken() {
 
 export async function listModels(browserContext) {
     return await getAvailableModels(browserContext);
+}
+
+// Создание нового чата через v2 API
+export async function createChatV2(model = "qwen-max-latest", title = "Новый чат") {
+    const browserContext = getBrowserContext();
+    if (!browserContext) {
+        return { error: 'Браузер не инициализирован' };
+    }
+
+    // Получаем токен из tokenManager
+    let tokenObj = await getAvailableToken();
+    if (tokenObj && tokenObj.token) {
+        authToken = tokenObj.token;
+        console.log(`Используется аккаунт для создания чата: ${tokenObj.id}`);
+    }
+
+    if (!authToken) {
+        console.log('Получение токена авторизации для создания чата...');
+        authToken = await extractAuthToken(browserContext);
+        if (!authToken) {
+            return { error: 'Не удалось получить токен авторизации' };
+        }
+    }
+
+    let page = null;
+    try {
+        page = await pagePool.getPage(browserContext);
+
+        const payload = {
+            title: title,
+            models: [model],
+            chat_mode: "normal",
+            chat_type: "t2t",
+            timestamp: Date.now()
+        };
+
+        const evalData = {
+            apiUrl: CREATE_CHAT_URL,
+            payload: payload,
+            token: authToken
+        };
+
+        const result = await page.evaluate(async (data) => {
+            try {
+                const response = await fetch(data.apiUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${data.token}`
+                    },
+                    body: JSON.stringify(data.payload)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    return { success: true, data: result };
+                } else {
+                    const errorBody = await response.text();
+                    return {
+                        success: false,
+                        status: response.status,
+                        errorBody: errorBody
+                    };
+                }
+            } catch (error) {
+                return { success: false, error: error.toString() };
+            }
+        }, evalData);
+
+        pagePool.releasePage(page);
+        page = null;
+
+        if (result.success && result.data.success) {
+            console.log(`Чат создан: ${result.data.data.id}`);
+            return { 
+                success: true, 
+                chatId: result.data.data.id,
+                requestId: result.data.request_id
+            };
+        } else {
+            console.error('Ошибка при создании чата:', result);
+            return { error: result.errorBody || result.error || 'Неизвестная ошибка' };
+        }
+    } catch (error) {
+        console.error('Ошибка при создании чата:', error);
+        return { error: error.toString() };
+    } finally {
+        if (page) {
+            try {
+                await page.close();
+            } catch (e) {
+                console.error('Ошибка при закрытии страницы:', e);
+            }
+        }
+    }
 }
 
 export async function testToken(token) {

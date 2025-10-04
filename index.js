@@ -8,7 +8,6 @@ import readline from 'readline';
 import { initBrowser, shutdownBrowser } from './src/browser/browser.js';
 import apiRoutes from './src/api/routes.js';
 import { getAvailableModelsFromFile, getApiKeys } from './src/api/chat.js';
-import { initHistoryDirectory } from './src/api/chatHistory.js';
 import { loadTokens } from './src/api/tokenManager.js';
 import { addAccountInteractive } from './src/utils/accountSetup.js';
 import { logHttpRequest, logInfo, logError, logWarn } from './src/logger/index.js';
@@ -119,8 +118,6 @@ async function startServer() {
 
     logInfo('Запуск сервера...');
 
-    initHistoryDirectory();
-
     if (!skipAccountMenu) {
         // Меню управления аккаунтами перед запуском прокси
         while (true) {
@@ -193,13 +190,9 @@ async function startServer() {
             logInfo('Для отправки сообщения: POST /api/chat');
             logInfo('Для получения списка моделей: GET /api/models');
             logInfo('======================================================');
-            logInfo('Управление чатами:');
+            logInfo('API v2 - История чатов хранится на серверах Qwen');
             logInfo('Создать новый чат: POST /api/chats');
-            logInfo('Получить список чатов: GET /api/chats');
-            logInfo('Получить историю чата: GET /api/chats/:chatId');
-            logInfo('Удалить чат: DELETE /api/chats/:chatId');
-            logInfo('Переименовать чат: PUT /api/chats/:chatId/rename');
-            logInfo('Автоудаление чатов: POST /api/chats/cleanup');
+            logInfo('Отправить сообщение: POST /api/chat (с chatId и parentId)');
             logInfo('======================================================');
             logInfo('Доступно 19 моделей Qwen (через систему маппинга):');
             logInfo('- Стандартные: qwen-max, qwen-plus, qwen-turbo и их latest-версии');
@@ -208,12 +201,12 @@ async function startServer() {
             logInfo('- Qwen 3: qwen3, qwen3-max, qwen3-plus, qwen3-omni-flash');
             logInfo('======================================================');
             logInfo('Формат JSON запроса на чат:');
-            logInfo('{ "message": "текст сообщения", "model": "название модели (опционально)", "chatId": "ID чата (опционально)" }');
-            logInfo('Пример запроса: { "message": "Привет, как дела?" }');
-            logInfo('Пример запроса с моделью: { "message": "Привет, как дела?", "model": "qwen-max" }');
-            logInfo('Пример запроса с сохранением контекста: { "message": "Привет, как дела?", "chatId": "полученный_id_чата" }');
+            logInfo('{ "message": "текст сообщения", "model": "название модели (опционально)", "chatId": "ID чата (опционально)", "parentId": "ID родительского сообщения (опционально)" }');
+            logInfo('Пример первого запроса: { "message": "Привет, как дела?" }');
+            logInfo('Пример второго запроса: { "message": "А что ты умеешь?", "chatId": "полученный_id_чата", "parentId": "полученный_parentId" }');
             logInfo('======================================================');
             logInfo('Поддержка OpenAI совместимого API: POST /api/chat/completions');
+            logInfo('В ответе возвращаются chatId и parentId для продолжения диалога');
             logInfo('======================================================');
 
 

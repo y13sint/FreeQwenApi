@@ -1,10 +1,9 @@
 // routes.js - Модуль с маршрутами для API
 import express from 'express';
-import { sendMessage, getAllModels, getApiKeys } from './chat.js';
+import { sendMessage, getAllModels, getApiKeys, createChatV2 } from './chat.js';
 import { getAuthenticationStatus } from '../browser/browser.js';
 import { checkAuthentication } from '../browser/auth.js';
 import { getBrowserContext } from '../browser/browser.js';
-import { getAllChats, loadHistory, createChat, deleteChat, chatExists, renameChat, deleteChatsAutomatically, saveHistory } from './chatHistory.js';
 import { logInfo, logError, logDebug } from '../logger/index.js';
 import { getMappedModel } from './modelMapping.js';
 import { getStsToken, uploadFileToQwen } from './fileUpload.js';
@@ -70,54 +69,22 @@ router.use((req, res, next) => {
     next();
 });
 
-// Маршрут для автоудаления чатов 
-// (должен быть определен до маршрутов с параметрами, чтобы избежать конфликта с /:chatId)
-router.post('/chats/cleanup', (req, res) => {
-    try {
-        logInfo(`Запрос на автоматическое удаление чатов: ${JSON.stringify(req.body)}`);
-        const criteria = req.body || {};
-
-        if (criteria.olderThan && (typeof criteria.olderThan !== 'number' || criteria.olderThan <= 0)) {
-            logError(`Некорректное значение olderThan: ${criteria.olderThan}`);
-            return res.status(400).json({ error: 'Некорректное значение olderThan' });
-        }
-
-        if (criteria.userMessageCountLessThan !== undefined &&
-            (typeof criteria.userMessageCountLessThan !== 'number' || criteria.userMessageCountLessThan < 0)) {
-            logError(`Некорректное значение userMessageCountLessThan: ${criteria.userMessageCountLessThan}`);
-            return res.status(400).json({ error: 'Некорректное значение userMessageCountLessThan' });
-        }
-
-        if (criteria.messageCountLessThan !== undefined &&
-            (typeof criteria.messageCountLessThan !== 'number' || criteria.messageCountLessThan < 0)) {
-            logError(`Некорректное значение messageCountLessThan: ${criteria.messageCountLessThan}`);
-            return res.status(400).json({ error: 'Некорректное значение messageCountLessThan' });
-        }
-
-        if (criteria.maxChats !== undefined &&
-            (typeof criteria.maxChats !== 'number' || criteria.maxChats <= 0)) {
-            logError(`Некорректное значение maxChats: ${criteria.maxChats}`);
-            return res.status(400).json({ error: 'Некорректное значение maxChats' });
-        }
-
-        const result = deleteChatsAutomatically(criteria);
-        logInfo(`Результат автоудаления: ${result.deletedCount} чатов удалено`);
-        res.json(result);
-    } catch (error) {
-        logError('Ошибка при автоматическом удалении чатов', error);
-        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
-    }
-});
-
 router.post('/chat', async (req, res) => {
     try {
-        const { message, messages, model, chatId } = req.body;
+        const { message, messages, model, chatId, parentId } = req.body;
 
         // Поддержка как message, так и messages для совместимости
         let messageContent = message;
+        let systemMessage = null;
 
         // Если указан параметр messages (множественное число), используем его в приоритете
         if (messages && Array.isArray(messages)) {
+            // Извлекаем system message если есть
+            const systemMsg = messages.find(msg => msg.role === 'system');
+            if (systemMsg) {
+                systemMessage = systemMsg.content;
+            }
+
             // Преобразуем формат messages в формат сообщения, понятный нашему прокси
             if (messages.length > 0) {
                 const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
@@ -137,20 +104,23 @@ router.post('/chat', async (req, res) => {
         }
 
         logInfo(`Получен запрос: ${typeof messageContent === 'string' ? messageContent.substring(0, 50) + (messageContent.length > 50 ? '...' : '') : 'Составное сообщение'}`);
+        if (systemMessage) {
+            logInfo(`System message: ${systemMessage.substring(0, 50)}${systemMessage.length > 50 ? '...' : ''}`);
+        }
         if (chatId) {
-            logInfo(`Используется chatId: ${chatId}`);
+            logInfo(`Используется chatId: ${chatId}, parentId: ${parentId || 'null'}`);
         }
 
-        let mappedModel = model;
+        let mappedModel = model || "qwen-max-latest";
         if (model) {
             mappedModel = getMappedModel(model);
             if (mappedModel !== model) {
                 logInfo(`Модель "${model}" заменена на "${mappedModel}"`);
             }
-            logInfo(`Используется модель: ${mappedModel}`);
         }
+        logInfo(`Используется модель: ${mappedModel}`);
 
-        const result = await sendMessage(messageContent, mappedModel, chatId);
+        const result = await sendMessage(messageContent, mappedModel, chatId, parentId, null, null, null, systemMessage);
 
         if (result.choices && result.choices[0] && result.choices[0].message) {
             const responseLength = result.choices[0].message.content ? result.choices[0].message.content.length : 0;
@@ -252,90 +222,23 @@ router.get('/status', async (req, res) => {
     }
 });
 
-router.post('/chats', (req, res) => {
+router.post('/chats', async (req, res) => {
     try {
-        const { name } = req.body;
-        logInfo(`Создание нового чата${name ? ` с именем: ${name}` : ''}`);
-        const chatId = createChat(name);
-        logInfo(`Создан новый чат с ID: ${chatId}`);
-        res.json({ chatId });
+        const { name, model } = req.body;
+        const chatModel = model ? getMappedModel(model) : 'qwen-max-latest';
+        logInfo(`Создание нового чата${name ? ` с именем: ${name}` : ''}, модель: ${chatModel}`);
+        
+        const result = await createChatV2(chatModel, name || "Новый чат");
+        
+        if (result.error) {
+            logError(`Ошибка создания чата: ${result.error}`);
+            return res.status(500).json({ error: result.error });
+        }
+        
+        logInfo(`Создан новый чат v2 с ID: ${result.chatId}`);
+        res.json({ chatId: result.chatId, success: true });
     } catch (error) {
         logError('Ошибка при создании чата', error);
-        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
-    }
-});
-
-router.get('/chats', (req, res) => {
-    try {
-        logInfo('Запрос списка чатов');
-        const chats = getAllChats();
-        logInfo(`Возвращено ${chats.length} чатов`);
-        res.json({ chats });
-    } catch (error) {
-        logError('Ошибка при получении списка чатов', error);
-        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
-    }
-});
-
-router.get('/chats/:chatId', (req, res) => {
-    try {
-        const { chatId } = req.params;
-        logInfo(`Запрос истории чата: ${chatId}`);
-
-        if (!chatId || !chatExists(chatId)) {
-            logError(`Чат не найден: ${chatId}`);
-            return res.status(404).json({ error: 'Чат не найден' });
-        }
-
-        const history = loadHistory(chatId);
-        logInfo(`Возвращена история чата ${chatId}, ${history.messages?.length || 0} сообщений`);
-        res.json({ chatId, history });
-    } catch (error) {
-        logError(`Ошибка при получении истории чата: ${req.params.chatId}`, error);
-        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
-    }
-});
-
-router.delete('/chats/:chatId', (req, res) => {
-    try {
-        const { chatId } = req.params;
-        logInfo(`Запрос на удаление чата: ${chatId}`);
-
-        if (!chatId || !chatExists(chatId)) {
-            logError(`Чат не найден при попытке удаления: ${chatId}`);
-            return res.status(404).json({ error: 'Чат не найден' });
-        }
-
-        const success = deleteChat(chatId);
-        logInfo(`Чат ${chatId} ${success ? 'успешно удален' : 'не удален'}`);
-        res.json({ success });
-    } catch (error) {
-        logError(`Ошибка при удалении чата: ${req.params.chatId}`, error);
-        res.status(500).json({ error: 'Внутренняя ошибка сервера' });
-    }
-});
-
-router.put('/chats/:chatId/rename', (req, res) => {
-    try {
-        const { chatId } = req.params;
-        const { name } = req.body;
-        logInfo(`Запрос на переименование чата ${chatId} на "${name}"`);
-
-        if (!chatId || !chatExists(chatId)) {
-            logError(`Чат не найден при попытке переименования: ${chatId}`);
-            return res.status(404).json({ error: 'Чат не найден' });
-        }
-
-        if (!name || typeof name !== 'string' || name.trim() === '') {
-            logError(`Некорректное имя чата: "${name}"`);
-            return res.status(400).json({ error: 'Имя чата не указано или некорректно' });
-        }
-
-        const success = renameChat(chatId, name.trim());
-        logInfo(`Чат ${chatId} ${success ? 'успешно переименован' : 'не переименован'}`);
-        res.json({ success, chatId, name: name.trim() });
-    } catch (error) {
-        logError(`Ошибка при переименовании чата: ${req.params.chatId}`, error);
         res.status(500).json({ error: 'Внутренняя ошибка сервера' });
     }
 });
@@ -351,7 +254,7 @@ router.post('/analyze/network', (req, res) => {
 
 router.post('/chat/completions', async (req, res) => {
     try {
-        const { messages, model, stream, tools, functions, tool_choice } = req.body;
+        const { messages, model, stream, tools, functions, tool_choice, chatId, parentId } = req.body;
 
         logInfo(`Получен OpenAI-совместимый запрос${stream ? ' (stream)' : ''}`);
 
@@ -360,36 +263,9 @@ router.post('/chat/completions', async (req, res) => {
             return res.status(400).json({ error: 'Сообщения не указаны' });
         }
 
-        const chatId = createChat("OpenAI API Chat");
-        logInfo(`Создан новый чат с ID: ${chatId} для запроса /chat/completions`);
-
-        let historyTransferred = false;
-        try {
-            logInfo(`Перенос истории сообщений из запроса в чат ${chatId}`);
-            const chatData = loadHistory(chatId);
-
-            for (const msg of messages) {
-                const timestamp = Math.floor(Date.now() / 1000);
-                const messageId = crypto.randomUUID();
-
-                const formattedMessage = {
-                    id: messageId,
-                    role: msg.role,
-                    content: msg.content,
-                    timestamp: timestamp,
-                    chat_type: "t2t"
-                };
-
-                chatData.messages.push(formattedMessage);
-                logDebug(`Добавлено сообщение с ролью "${msg.role}" в историю чата ${chatId}`);
-            }
-
-            saveHistory(chatId, chatData);
-            historyTransferred = true;
-            logInfo(`История из ${messages.length} сообщений успешно перенесена в чат ${chatId}`);
-        } catch (error) {
-            logError(`Ошибка при переносе истории в чат ${chatId}`, error);
-        }
+        // Извлекаем system message если есть
+        const systemMsg = messages.find(msg => msg.role === 'system');
+        const systemMessage = systemMsg ? systemMsg.content : null;
 
         const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
         if (!lastUserMessage) {
@@ -404,6 +280,10 @@ router.post('/chat/completions', async (req, res) => {
             logInfo(`Модель "${model}" заменена на "${mappedModel}"`);
         }
         logInfo(`Используется модель: ${mappedModel}`);
+
+        if (systemMessage) {
+            logInfo(`System message: ${systemMessage.substring(0, 50)}${systemMessage.length > 50 ? '...' : ''}`);
+        }
 
         if (stream) {
             res.setHeader('Content-Type', 'text/event-stream');
@@ -425,7 +305,8 @@ router.post('/chat/completions', async (req, res) => {
             });
 
             try {
-                const result = await sendMessage(null, mappedModel, chatId);
+                const combinedTools = tools || (functions ? functions.map(fn => ({ type: 'function', function: fn })) : null);
+                const result = await sendMessage(messageContent, mappedModel, chatId, parentId, null, combinedTools, tool_choice, systemMessage);
 
                 if (result.error) {
                     writeSse({
@@ -439,7 +320,6 @@ router.post('/chat/completions', async (req, res) => {
                     });
                 } else if (result.choices && result.choices[0] && result.choices[0].message) {
                     const content = String(result.choices[0].message.content || '');
-
 
                     const codePoints = Array.from(content);
                     const chunkSize = 16;
@@ -487,7 +367,7 @@ router.post('/chat/completions', async (req, res) => {
             }
         } else {
             const combinedTools = tools || (functions ? functions.map(fn => ({ type: 'function', function: fn })) : null);
-            const result = await sendMessage(null, mappedModel, chatId, null, combinedTools, tool_choice);
+            const result = await sendMessage(messageContent, mappedModel, chatId, parentId, null, combinedTools, tool_choice, systemMessage);
 
             if (result.error) {
                 return res.status(500).json({
@@ -512,7 +392,9 @@ router.post('/chat/completions', async (req, res) => {
                     prompt_tokens: 0,
                     completion_tokens: 0,
                     total_tokens: 0
-                }
+                },
+                chatId: result.chatId,
+                parentId: result.parentId
             };
 
             res.json(openaiResponse);
