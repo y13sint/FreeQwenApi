@@ -45,6 +45,20 @@ app.use(logHttpRequest);
 app.use(bodyParser.json({ limit: '150mb' }));
 app.use(bodyParser.urlencoded({ limit: '150mb', extended: true }));
 
+app.use((err, req, res, next) => {
+    const isJsonSyntaxError = err instanceof SyntaxError && err.status === 400 && Object.prototype.hasOwnProperty.call(err, 'body');
+
+    if (isJsonSyntaxError) {
+        logWarn(`Некорректный JSON в запросе: ${err.message}`);
+        return res.status(400).json({
+            error: 'Некорректный JSON',
+            message: 'Проверьте тело запроса: используйте валидный JSON с двойными кавычками.'
+        });
+    }
+
+    return next(err);
+});
+
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');

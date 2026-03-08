@@ -731,15 +731,21 @@ curl -X POST http://localhost:3264/api/chat/completions \
 POST /api/chat/completions
 ```
 
-### Особенности работы
+### Behavior
 
-1. **Создание нового чата для каждого запроса:** Каждый запрос к `/chat/completions` создаёт новый чат в системе с именем "OpenAI API Chat".
+1. **No forced new chat per request:** if `chatId` is omitted, the proxy first tries to restore chat context from the session (IP + User-Agent) or by `conversation_id`, and only then creates a new chat.
 
-2. **Сохранение полной истории сообщений:** Все сообщения из запроса (включая системные, пользовательские и сообщения ассистента) сохраняются в истории чата.
+2. **Both id formats are supported:** `chatId`/`parentId` and `chat_id`/`parent_id`.
 
-3. **Поддержка системных сообщений:** Прокси корректно обрабатывает и сохраняет системные сообщения (`role: "system"`), которые часто используются для настройки поведения модели.
+3. **Force a fresh chat:** send `newChat: true` or `new_chat: true`.
 
-**Пример запроса с системным сообщением:**
+4. **System messages are supported:** `role: "system"` is passed through to the upstream model.
+
+5. **Strict JSON parsing:** invalid JSON (for example, single quotes instead of double quotes) returns `400 Invalid JSON`.
+
+6. **Method check:** `GET /api/chat/completions` returns `405`; use `POST`.
+
+**System message request example:**
 
 ```json
 {
