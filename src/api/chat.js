@@ -394,8 +394,13 @@ async function executeApiRequest(page, apiUrl, payload, token) {
                     const body = await response.text();
                     try {
                         const parsed = JSON.parse(body);
+                        // RateLimited или явная ошибка
                         if (parsed.code === 'RateLimited' || parsed.error) {
                             return { success: false, status: 429, errorBody: body };
+                        }
+                        // Валидный JSON-ответ completion (иногда Qwen возвращает так)
+                        if (parsed.choices || parsed.data || parsed.id) {
+                            return { success: true, isTask: false, data: parsed };
                         }
                     } catch { /* not JSON, treat as unexpected */ }
                     return { success: false, error: 'Unexpected non-SSE 200 response', errorBody: body };
