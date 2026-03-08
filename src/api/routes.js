@@ -352,6 +352,12 @@ router.post('/chat', async (req, res) => {
                             { index: 0, delta: { content: `Error: ${result.error}` }, finish_reason: 'stop' }
                         ]
                     });
+                } else if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
+                    // Qwen вернул JSON вместо SSE - отправляем контент одним чанком
+                    const content = result.choices[0].message.content;
+                    if (typeof streamingCallback === 'function') {
+                        streamingCallback(content);
+                    }
                 }
                 // Чанки уже были отправлены через streamingCallback, не дублируем!
 
@@ -633,6 +639,12 @@ router.post('/chat/completions', async (req, res) => {
                             { index: 0, delta: { content: `Error: ${result.error}` }, finish_reason: null }
                         ]
                     });
+                } else if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
+                    // Qwen вернул JSON вместо SSE - отправляем контент одним чанком
+                    const content = result.choices[0].message.content;
+                    if (typeof streamingCallback === 'function') {
+                        streamingCallback(content);
+                    }
                 }
                 // Чанки уже были отправлены через streamingCallback, не дублируем!
 
@@ -860,6 +872,12 @@ router.post('/v1/chat/completions', async (req, res) => {
                             { index: 0, delta: { content: `Error: ${result.error}` }, finish_reason: 'stop' }
                         ]
                     });
+                } else if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
+                    // Qwen вернул JSON вместо SSE - отправляем контент одним чанком
+                    const content = result.choices[0].message.content;
+                    if (typeof streamingCallback === 'function') {
+                        streamingCallback(content);
+                    }
                 }
                 // Чанки уже были отправлены через streamingCallback, не дублируем!
 
