@@ -17,6 +17,7 @@
         "example:axios": "node examples/direct-api/axios-example.js",
         "example:chat-management": "node examples/direct-api/chat-management.js",
         "example:file-upload": "node examples/file-upload/upload-example.js",
+        "example:streaming-test": "node examples/streaming-test.js",
         "auth": "node scripts/auth.js"
     },
     "dependencies": {

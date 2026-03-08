@@ -194,11 +194,12 @@ async function startServer() {
             logInfo('Создать новый чат: POST /api/chats');
             logInfo('Отправить сообщение: POST /api/chat (с chatId и parentId)');
             logInfo('======================================================');
-            logInfo('Доступно 19 моделей Qwen (через систему маппинга):');
+            logInfo('Доступно 25 моделей Qwen (через систему маппинга):');
             logInfo('- Стандартные: qwen-max, qwen-plus, qwen-turbo и их latest-версии');
             logInfo('- Coder: qwen3-coder-plus, qwen2.5-coder-*b-instruct (0.5b - 32b)');
             logInfo('- Визуальные: qwen-vl-max, qwen-vl-plus и их latest-версии');
             logInfo('- Qwen 3: qwen3, qwen3-max, qwen3-plus, qwen3-omni-flash');
+            logInfo('- Qwen 3.5: qwen3.5-plus, qwen3.5-flash, qwen3.5-397b-a17b, qwen3.5-122b-a10b, qwen3.5-27b, qwen3.5-35b-a3b');
             logInfo('======================================================');
             logInfo('Формат JSON запроса на чат:');
             logInfo('{ "message": "текст сообщения", "model": "название модели (опционально)", "chatId": "ID чата (опционально)", "parentId": "ID родительского сообщения (опционально)" }');
