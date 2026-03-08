@@ -24,6 +24,7 @@ const AUTH_KEYS_FILE = path.join(__dirname, '..', 'Authorization.txt');
 let authToken = null;
 let availableModels = null;
 let authKeys = null;
+let browserTokenRateLimited = false;
 
 const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -43,8 +44,19 @@ export const pagePool = {
     maxSize: PAGE_POOL_SIZE,
 
     async getPage(context) {
-        if (this.pages.length > 0) {
-            return this.pages.pop();
+        while (this.pages.length > 0) {
+            const page = this.pages.pop();
+            try {
+                if (page.isClosed()) {
+                    logWarn('Страница из пула закрыта, пропускаем');
+                    continue;
+                }
+                await page.evaluate(() => document.readyState);
+                return page;
+            } catch (e) {
+                logWarn(`Страница из пула протухла (${e.message?.substring(0, 60)}), создаём новую`);
+                try { await page.close(); } catch { /* already dead */ }
+            }
         }
 
         const newPage = await getPage(context);
@@ -66,6 +78,10 @@ export const pagePool = {
     },
 
     releasePage(page) {
+        try {
+            if (page.isClosed()) return;
+        } catch { return; }
+
         if (this.pages.length < this.maxSize) {
             this.pages.push(page);
         } else {
@@ -266,6 +282,11 @@ async function resolveAuthToken(browserContext) {
         return tokenObj;
     }
 
+    if (browserTokenRateLimited) {
+        logWarn('Browser-токен залимичен, пропускаем fallback');
+        return null;
+    }
+
     if (!getAuthenticationStatus()) {
         logInfo('Проверка авторизации...');
         const authCheck = await checkAuthentication(browserContext);
@@ -361,7 +382,23 @@ async function executeApiRequest(page, apiUrl, payload, token) {
             if (response.ok) {
                 if (data.payload.stream === false) {
                     const jsonResponse = await response.json();
+                    if (jsonResponse.code === 'RateLimited' || jsonResponse.error) {
+                        return { success: false, status: 429, errorBody: JSON.stringify(jsonResponse) };
+                    }
                     return { success: true, isTask: true, data: jsonResponse };
+                }
+
+                const contentType = response.headers.get('content-type') || '';
+
+                if (!contentType.includes('text/event-stream')) {
+                    const body = await response.text();
+                    try {
+                        const parsed = JSON.parse(body);
+                        if (parsed.code === 'RateLimited' || parsed.error) {
+                            return { success: false, status: 429, errorBody: body };
+                        }
+                    } catch { /* not JSON, treat as unexpected */ }
+                    return { success: false, error: 'Unexpected non-SSE 200 response', errorBody: body };
                 }
 
                 const reader = response.body.getReader();
@@ -371,6 +408,7 @@ async function executeApiRequest(page, apiUrl, payload, token) {
                 let responseId = null;
                 let usage = null;
                 let finished = false;
+                let streamError = null;
 
                 while (!finished) {
                     const { done, value } = await reader.read();
@@ -385,6 +423,18 @@ async function executeApiRequest(page, apiUrl, payload, token) {
                         if (!jsonStr) continue;
                         try {
                             const chunk = JSON.parse(jsonStr);
+
+                            if (chunk.code === 'RateLimited' || (chunk.code && chunk.detail)) {
+                                streamError = { status: 429, errorBody: JSON.stringify(chunk) };
+                                finished = true;
+                                break;
+                            }
+                            if (chunk.error && !chunk.choices) {
+                                streamError = { status: 500, errorBody: JSON.stringify(chunk) };
+                                finished = true;
+                                break;
+                            }
+
                             if (chunk['response.created']) responseId = chunk['response.created'].response_id;
                             if (chunk.choices && chunk.choices[0]) {
                                 const delta = chunk.choices[0].delta;
@@ -394,6 +444,10 @@ async function executeApiRequest(page, apiUrl, payload, token) {
                             if (chunk.usage) usage = chunk.usage;
                         } catch { /* ignore parse errors for individual chunks */ }
                     }
+                }
+
+                if (streamError) {
+                    return { success: false, ...streamError };
                 }
 
                 return {
@@ -437,7 +491,8 @@ async function handleApiError(response, tokenObj, message, model, chatId, parent
     if (response.status === 401 || (response.errorBody && (response.errorBody.includes('Unauthorized') || response.errorBody.includes('Token has expired')))) {
         logWarn(`Токен ${tokenObj?.id} недействителен (401). Удаляем и пробуем другой.`);
         authToken = null;
-        if (tokenObj?.id) {
+        browserTokenRateLimited = false;
+        if (tokenObj?.id && tokenObj.id !== 'browser') {
             const { markInvalid } = await import('./tokenManager.js');
             markInvalid(tokenObj.id);
         }
@@ -446,27 +501,30 @@ async function handleApiError(response, tokenObj, message, model, chatId, parent
             return sendMessage(message, model, chatId, parentId, files, null, null, null, chatType, size, waitForCompletion, retryCount + 1);
         }
         logError('Не осталось валидных токенов или исчерпаны попытки.');
-        await pagePool.clear();
-        await shutdownBrowser();
-        process.exit(1);
+        return { error: 'Все токены недействительны (401). Требуется повторная авторизация.', chatId };
     }
 
-    if (response.errorBody && response.errorBody.includes('RateLimited')) {
+    if (response.status === 429 || (response.errorBody && response.errorBody.includes('RateLimited'))) {
+        let hours = 24;
         try {
             const rateInfo = JSON.parse(response.errorBody);
-            const hours = Number(rateInfo.num) || 24;
-            if (tokenObj?.id) {
-                markRateLimited(tokenObj.id, hours);
-                logWarn(`Токен ${tokenObj.id} достиг лимита. Помечаем на ${hours}ч и пробуем другой токен...`);
-            }
-        } catch (e) {
-            logError('Не удалось распарсить тело ошибки RateLimited', e);
+            hours = Number(rateInfo.num) || 24;
+        } catch { /* errorBody might not be valid JSON */ }
+
+        if (tokenObj?.id === 'browser') {
+            browserTokenRateLimited = true;
+            logWarn(`Browser-токен достиг лимита. Помечаем на ${hours}ч.`);
+        } else if (tokenObj?.id) {
+            markRateLimited(tokenObj.id, hours);
+            logWarn(`Токен ${tokenObj.id} достиг лимита. Помечаем на ${hours}ч и пробуем другой токен...`);
         }
+
         authToken = null;
-        if (retryCount < MAX_RETRY_COUNT) {
+        const { hasValidTokens } = await import('./tokenManager.js');
+        if (hasValidTokens() && retryCount < MAX_RETRY_COUNT) {
             return sendMessage(message, model, chatId, parentId, files, null, null, null, chatType, size, waitForCompletion, retryCount + 1);
         }
-        return { error: 'Все токены заблокированы по лимиту', chatId };
+        return { error: `Все токены заблокированы по лимиту (${hours}ч)`, chatId };
     }
 
     return { error: response.error || response.statusText, details: response.errorBody || 'Нет дополнительных деталей', chatId };
@@ -650,7 +708,7 @@ export function getAuthToken() {
 
 // ─── createChatV2 ────────────────────────────────────────────────────────────
 
-export async function createChatV2(model = DEFAULT_MODEL, title = 'Новый чат') {
+export async function createChatV2(model = DEFAULT_MODEL, title = 'Новый чат', retryCount = 0) {
     const browserContext = getBrowserContext();
     if (!browserContext) return { error: 'Браузер не инициализирован' };
 
@@ -695,8 +753,18 @@ export async function createChatV2(model = DEFAULT_MODEL, title = 'Новый ч
             return { success: true, chatId: result.data.data.id, requestId: result.data.request_id };
         }
 
-        logError(`Ошибка при создании чата: ${JSON.stringify(result)}`);
-        return { error: result.errorBody || result.error || 'Неизвестная ошибка' };
+        const isTransient = result.status >= 500 && result.status < 600;
+        if (isTransient && retryCount < MAX_RETRY_COUNT) {
+            logWarn(`Создание чата: ${result.status}, ретрай ${retryCount + 1}/${MAX_RETRY_COUNT} через ${RETRY_DELAY}мс...`);
+            await delay(RETRY_DELAY);
+            return createChatV2(model, title, retryCount + 1);
+        }
+
+        const cleanError = isTransient
+            ? `Qwen API недоступен (${result.status}). Повторите позже.`
+            : (result.errorBody || result.error || 'Неизвестная ошибка');
+        logError(`Ошибка при создании чата: ${result.status || 'unknown'} (попытка ${retryCount + 1})`);
+        return { error: cleanError };
     } catch (error) {
         logError('Ошибка при создании чата', error);
         return { error: error.toString() };
