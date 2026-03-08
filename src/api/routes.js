@@ -355,9 +355,12 @@ router.post('/chat', async (req, res) => {
                 } else if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
                     // Qwen вернул JSON вместо SSE - отправляем контент одним чанком
                     const content = result.choices[0].message.content;
+                    logDebug(`JSON response content length: ${content.length}`);
                     if (typeof streamingCallback === 'function') {
                         streamingCallback(content);
                     }
+                } else {
+                    logDebug(`Result structure: ${JSON.stringify(Object.keys(result))}`);
                 }
                 // Чанки уже были отправлены через streamingCallback, не дублируем!
 
@@ -642,9 +645,12 @@ router.post('/chat/completions', async (req, res) => {
                 } else if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
                     // Qwen вернул JSON вместо SSE - отправляем контент одним чанком
                     const content = result.choices[0].message.content;
+                    logDebug(`JSON response content length: ${content.length}`);
                     if (typeof streamingCallback === 'function') {
                         streamingCallback(content);
                     }
+                } else {
+                    logDebug(`Result structure: ${JSON.stringify(Object.keys(result))}`);
                 }
                 // Чанки уже были отправлены через streamingCallback, не дублируем!
 
@@ -875,9 +881,12 @@ router.post('/v1/chat/completions', async (req, res) => {
                 } else if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
                     // Qwen вернул JSON вместо SSE - отправляем контент одним чанком
                     const content = result.choices[0].message.content;
+                    logDebug(`JSON response content length: ${content.length}`);
                     if (typeof streamingCallback === 'function') {
                         streamingCallback(content);
                     }
+                } else {
+                    logDebug(`Result structure: ${JSON.stringify(Object.keys(result))}`);
                 }
                 // Чанки уже были отправлены через streamingCallback, не дублируем!
 

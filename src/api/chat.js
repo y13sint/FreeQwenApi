@@ -537,7 +537,7 @@ async function handleApiError(response, tokenObj, message, model, chatId, parent
 
 // ─── Main public API ─────────────────────────────────────────────────────────
 
-export async function sendMessage(message, model = DEFAULT_MODEL, chatId = null, parentId = null, files = null, tools = null, toolChoice = null, systemMessage = null, chatType = 't2t', size = null, waitForCompletion = true, retryCount = 0) {
+export async function sendMessage(message, model = DEFAULT_MODEL, chatId = null, parentId = null, files = null, tools = null, toolChoice = null, systemMessage = null, chatType = 't2t', size = null, waitForCompletion = true, retryCount = 0, onChunk = null) {
     if (!availableModels) availableModels = getAvailableModelsFromFile();
 
     if (!chatId) {
@@ -669,6 +669,12 @@ export async function sendMessage(message, model = DEFAULT_MODEL, chatId = null,
             response.data.chatId = chatId;
             response.data.parentId = response.data.response_id;
             response.data.id = response.data.id || 'chatcmpl-' + Date.now();
+            
+            // Если есть onChunk и контент - отправляем через него
+            if (typeof onChunk === 'function' && response.data.choices?.[0]?.message?.content) {
+                onChunk(response.data.choices[0].message.content);
+            }
+            
             return response.data;
         }
 
