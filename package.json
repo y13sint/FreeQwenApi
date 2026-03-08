@@ -16,8 +16,7 @@
         "example:direct": "node examples/direct-api/fetch-example.js",
         "example:axios": "node examples/direct-api/axios-example.js",
         "example:file-upload": "node examples/file-upload/upload-example.js",
-        "test:features": "node examples/test-features.js",
-        "test:video-polling": "node examples/test-video-polling.js",
+        "example:streaming-test": "node examples/streaming-test.js",
         "auth": "node scripts/auth.js"
     },
     "dependencies": {
