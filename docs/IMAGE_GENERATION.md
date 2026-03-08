@@ -1,6 +1,6 @@
 # Настройка генерации изображений
 
-## Получение API ключа DashScope
+## Получение API ключа DashScope777
 
 1. Зарегистрируйтесь на платформе Alibaba Cloud DashScope:
    - Международный: https://dashscope.console.aliyun.com/
