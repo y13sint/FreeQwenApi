@@ -50,6 +50,87 @@ function generateChatIdFromHistory(messages) {
     return `chat_${hash}`;
 }
 
+function normalizeIdValue(value) {
+    if (value === null || value === undefined) return null;
+    if (typeof value === 'number' || typeof value === 'bigint') return String(value);
+    if (typeof value !== 'string') return null;
+
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+
+    const lower = trimmed.toLowerCase();
+    if (lower === 'null' || lower === 'undefined') return null;
+
+    return trimmed;
+}
+
+function pickFirstId(candidates) {
+    for (const candidate of candidates) {
+        const normalized = normalizeIdValue(candidate);
+        if (normalized) return normalized;
+    }
+    return null;
+}
+
+function buildInternalChatIdFromHint(hint) {
+    const normalizedHint = normalizeIdValue(hint);
+    if (!normalizedHint) return null;
+
+    const hash = crypto
+        .createHash('sha256')
+        .update(`client-conversation:${normalizedHint}`)
+        .digest('hex')
+        .substring(0, 16);
+
+    return `chat_${hash}`;
+}
+
+function extractConversationHint(req) {
+    const body = req.body || {};
+    const metadata = body && typeof body.metadata === 'object' ? body.metadata : {};
+
+    return pickFirstId([
+        body.conversation_id,
+        body.conversationId,
+        body.chat_id,
+        metadata.conversation_id,
+        metadata.conversationId,
+        metadata.chat_id,
+        metadata.chatId,
+        req.get?.('x-conversation-id'),
+        req.get?.('x-openwebui-conversation-id'),
+        req.get?.('x-chat-id'),
+        req.get?.('x-openwebui-chat-id')
+    ]);
+}
+
+function extractParentHint(req) {
+    const body = req.body || {};
+    const metadata = body && typeof body.metadata === 'object' ? body.metadata : {};
+
+    return pickFirstId([
+        body.parentId,
+        body.parent_id,
+        body.x_qwen_parent_id,
+        body.response_id,
+        metadata.parentId,
+        metadata.parent_id,
+        metadata.response_id,
+        req.get?.('x-parent-id'),
+        req.get?.('x-openwebui-parent-id')
+    ]);
+}
+
+function shouldRestoreSessionChat(messages) {
+    if (!Array.isArray(messages) || messages.length === 0) return false;
+
+    const assistantOrToolPresent = messages.some(msg => msg?.role === 'assistant' || msg?.role === 'tool');
+    if (assistantOrToolPresent) return true;
+
+    const userMessageCount = messages.filter(msg => msg?.role === 'user').length;
+    return userMessageCount > 1;
+}
+
 // Глобальное хранилище для маппинга между сгенерированными ID и реальными Qwen chatId
 const chatIdMap = new Map();
 
@@ -99,25 +180,38 @@ function getSessionKey(req) {
     return crypto.createHash('sha256').update(`${ip}||${userAgent}`).digest('hex');
 }
 
-function getSavedChatId(req) {
-    const sessionKey = getSessionKey(req);
-    const sessionData = sessionToChatMap.get(sessionKey);
-    if (sessionData && (Date.now() - sessionData.timestamp) < 3600000) { // 1 час
-        return sessionData;
-    }
-    return null;
+function getScopedSessionKey(req, scope = null) {
+    const baseKey = getSessionKey(req);
+    const normalizedScope = normalizeIdValue(scope);
+    return normalizedScope ? `${baseKey}::${normalizedScope}` : baseKey;
 }
 
-function saveChatIdForSession(req, chatId, parentId) {
-    const sessionKey = getSessionKey(req);
+function getSavedChatId(req, scope = null) {
+    const keysToTry = [getScopedSessionKey(req, scope)];
+
+    for (const sessionKey of keysToTry) {
+        const sessionData = sessionToChatMap.get(sessionKey);
+        if (sessionData && (Date.now() - sessionData.timestamp) < 3600000) { // 1 hour
+            return sessionData;
+        }
+    }
+
+    return null;
+}
+function saveChatIdForSession(req, chatId, parentId, scope = null) {
+    const sessionKey = getScopedSessionKey(req, scope);
+    const normalizedScope = normalizeIdValue(scope);
+
     sessionToChatMap.set(sessionKey, {
         chatId,
         parentId,
+        scope: normalizedScope,
         timestamp: Date.now()
     });
-    logDebug(`Сохранён chatId ${chatId} для сессии ${sessionKey.substring(0, 8)}`);
-}
 
+    const scopeSuffix = normalizedScope ? ` (scope=${normalizedScope})` : "";
+    logDebug(`Saved chatId ${chatId} for session ${sessionKey.substring(0, 8)}${scopeSuffix}`);
+}
 // Очистка старых сессий каждые 10 минут
 setInterval(() => {
     const now = Date.now();
@@ -326,8 +420,10 @@ router.post('/chat', async (req, res) => {
             try {
                 // Setup streaming callback
                 let streamingCallback = null;
+                let hasStreamedChunks = false;
                 if (stream) {
                     streamingCallback = (chunk) => {
+                        hasStreamedChunks = true;
                         writeSse({
                             id: 'chatcmpl-' + Date.now(),
                             object: 'chat.completion.chunk',
@@ -340,7 +436,21 @@ router.post('/chat', async (req, res) => {
                     };
                 }
 
-                const result = await sendMessage(messageContent, mappedModel, isMeta ? null : chatId, isMeta ? null : parentId, null, null, null, systemMessage, streamingCallback);
+                const result = await sendMessage(
+                    messageContent,
+                    mappedModel,
+                    isMeta ? null : chatId,
+                    isMeta ? null : parentId,
+                    null,
+                    null,
+                    null,
+                    systemMessage,
+                    't2t',
+                    null,
+                    true,
+                    0,
+                    streamingCallback
+                );
 
                 if (result.error) {
                     writeSse({
@@ -352,7 +462,7 @@ router.post('/chat', async (req, res) => {
                             { index: 0, delta: { content: `Error: ${result.error}` }, finish_reason: 'stop' }
                         ]
                     });
-                } else if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
+                } else if (!hasStreamedChunks && result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
                     // Qwen вернул JSON вместо SSE - отправляем контент одним чанком
                     const content = result.choices[0].message.content;
                     logDebug(`JSON response content length: ${content.length}`);
@@ -501,7 +611,13 @@ router.post('/chats', async (req, res) => {
 
 router.post('/chat/completions', async (req, res) => {
     try {
-        const { messages, model, stream, tools, functions, tool_choice, chatId, parentId } = req.body;
+        const { messages, model, stream, tools, functions, tool_choice, chatId } = req.body;
+        const snakeCaseChatId = normalizeIdValue(req.body?.chat_id);
+        const snakeCaseParentId = normalizeIdValue(req.body?.parent_id);
+        const explicitChatId = normalizeIdValue(chatId) || ((snakeCaseChatId && snakeCaseParentId) ? snakeCaseChatId : null);
+        const explicitParentId = extractParentHint(req);
+        const conversationHint = extractConversationHint(req);
+        const conversationScope = conversationHint ? `conversation:${conversationHint}` : null;
         logInfo(`Получен OpenAI-совместимый запрос${stream ? ' (stream)' : ''}`);
 
         if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -512,22 +628,35 @@ router.post('/chat/completions', async (req, res) => {
         const isMeta = isOpenWebUiMetaRequest(messages);
 
         // Используем переданный chatId ИЛИ восстанавливаем из сессии
-        let effectiveChatId = chatId;
-        let effectiveParentId = parentId;
+        let effectiveChatId = explicitChatId;
+        let effectiveParentId = explicitParentId;
 
         if (!effectiveChatId && !isMeta) {
-            // Пробуем восстановить из сессии (для Open WebUI, которая не сохраняет chatId)
-            const savedSession = getSavedChatId(req);
-            if (savedSession) {
-                effectiveChatId = savedSession.chatId;
-                effectiveParentId = savedSession.parentId;
-                logInfo(`✅ Восстановлен chatId из сессии: ${effectiveChatId}`);
+            if (conversationHint) {
+                effectiveChatId = buildInternalChatIdFromHint(conversationHint);
+                const scopedSession = getSavedChatId(req, conversationScope);
+                if (scopedSession?.parentId) {
+                    effectiveParentId = scopedSession.parentId;
+                }
+                logInfo(`Using client conversation-id key: ${effectiveChatId}`);
             } else {
-                // Если это первое сообщение в сессии, генерируем ID
-                const generatedId = generateChatIdFromHistory(messages);
-                if (generatedId) {
-                    effectiveChatId = generatedId;
-                    logInfo(`📝 Создан новый chatId для сессии: ${effectiveChatId}`);
+                const canRestoreSession = shouldRestoreSessionChat(messages) || Boolean(effectiveParentId);
+
+                if (canRestoreSession) {
+                    const savedSession = getSavedChatId(req);
+                    if (savedSession) {
+                        effectiveChatId = savedSession.chatId;
+                        effectiveParentId = savedSession.parentId;
+                        logInfo(`Restored chatId from session: ${effectiveChatId}`);
+                    }
+                }
+
+                if (!effectiveChatId) {
+                    const generatedId = generateChatIdFromHistory(messages);
+                    if (generatedId) {
+                        effectiveChatId = generatedId;
+                        logInfo(`Created new chatId for session: ${effectiveChatId}`);
+                    }
                 }
             }
         }
@@ -606,8 +735,10 @@ router.post('/chat/completions', async (req, res) => {
 
                 // Setup streaming callback if stream=true
                 let streamingCallback = null;
+                let hasStreamedChunks = false;
                 if (stream) {
                     streamingCallback = (chunk) => {
+                        hasStreamedChunks = true;
                         writeSse({
                             id: 'chatcmpl-stream',
                             object: 'chat.completion.chunk',
@@ -620,7 +751,21 @@ router.post('/chat/completions', async (req, res) => {
                     };
                 }
 
-                const result = await sendMessage(messageContent, mappedModel, qwenChatId, effectiveParentId, null, combinedTools, tool_choice, systemMessage, streamingCallback);
+                const result = await sendMessage(
+                    messageContent,
+                    mappedModel,
+                    qwenChatId,
+                    effectiveParentId,
+                    null,
+                    combinedTools,
+                    tool_choice,
+                    systemMessage,
+                    't2t',
+                    null,
+                    true,
+                    0,
+                    streamingCallback
+                );
 
                 // Сохраняем chatId в сессию для следующих запросов
                 if (!isMeta && result.chatId) {
@@ -629,7 +774,7 @@ router.post('/chat/completions', async (req, res) => {
                         mapChatId(effectiveChatId, result.chatId);
                         logDebug(`Маппинг сохранён: ${effectiveChatId} -> ${result.chatId}`);
                     }
-                    saveChatIdForSession(req, result.chatId, result.parentId);
+                    saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
                 }
 
                 if (result.error) {
@@ -642,7 +787,7 @@ router.post('/chat/completions', async (req, res) => {
                             { index: 0, delta: { content: `Error: ${result.error}` }, finish_reason: null }
                         ]
                     });
-                } else if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
+                } else if (!hasStreamedChunks && result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
                     // Qwen вернул JSON вместо SSE - отправляем контент одним чанком
                     const content = result.choices[0].message.content;
                     logDebug(`JSON response content length: ${content.length}`);
@@ -686,7 +831,7 @@ router.post('/chat/completions', async (req, res) => {
 
             // Сохраняем chatId в сессию для следующих запросов
             if (!isMeta && result.chatId) {
-                saveChatIdForSession(req, result.chatId, result.parentId);
+                saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
             }
 
             if (result.error) {
@@ -743,7 +888,13 @@ router.post('/chat/completions', async (req, res) => {
 // OpenAI совместимый эндпоинт v1 (для Open WebUI и других клиентов)
 router.post('/v1/chat/completions', async (req, res) => {
     try {
-        const { messages, model, stream, tools, functions, tool_choice, chatId, parentId } = req.body;
+        const { messages, model, stream, tools, functions, tool_choice, chatId } = req.body;
+        const snakeCaseChatId = normalizeIdValue(req.body?.chat_id);
+        const snakeCaseParentId = normalizeIdValue(req.body?.parent_id);
+        const explicitChatId = normalizeIdValue(chatId) || ((snakeCaseChatId && snakeCaseParentId) ? snakeCaseChatId : null);
+        const explicitParentId = extractParentHint(req);
+        const conversationHint = extractConversationHint(req);
+        const conversationScope = conversationHint ? `conversation:${conversationHint}` : null;
 
         logInfo(`Получен OpenAI v1 запрос${stream ? ' (stream)' : ''}`);
 
@@ -755,22 +906,35 @@ router.post('/v1/chat/completions', async (req, res) => {
         const isMeta = isOpenWebUiMetaRequest(messages);
 
         // Используем переданный chatId ИЛИ восстанавливаем из сессии
-        let effectiveChatId = chatId;
-        let effectiveParentId = parentId;
+        let effectiveChatId = explicitChatId;
+        let effectiveParentId = explicitParentId;
 
         if (!effectiveChatId && !isMeta) {
-            // Пробуем восстановить из сессии (для Open WebUI, которая не сохраняет chatId)
-            const savedSession = getSavedChatId(req);
-            if (savedSession) {
-                effectiveChatId = savedSession.chatId;
-                effectiveParentId = savedSession.parentId;
-                logInfo(`✅ Восстановлен chatId из сессии: ${effectiveChatId}`);
+            if (conversationHint) {
+                effectiveChatId = buildInternalChatIdFromHint(conversationHint);
+                const scopedSession = getSavedChatId(req, conversationScope);
+                if (scopedSession?.parentId) {
+                    effectiveParentId = scopedSession.parentId;
+                }
+                logInfo(`Using client conversation-id key: ${effectiveChatId}`);
             } else {
-                // Если это первое сообщение в сессии, генерируем ID
-                const generatedId = generateChatIdFromHistory(messages);
-                if (generatedId) {
-                    effectiveChatId = generatedId;
-                    logInfo(`📝 Создан новый chatId для сессии: ${effectiveChatId}`);
+                const canRestoreSession = shouldRestoreSessionChat(messages) || Boolean(effectiveParentId);
+
+                if (canRestoreSession) {
+                    const savedSession = getSavedChatId(req);
+                    if (savedSession) {
+                        effectiveChatId = savedSession.chatId;
+                        effectiveParentId = savedSession.parentId;
+                        logInfo(`Restored chatId from session: ${effectiveChatId}`);
+                    }
+                }
+
+                if (!effectiveChatId) {
+                    const generatedId = generateChatIdFromHistory(messages);
+                    if (generatedId) {
+                        effectiveChatId = generatedId;
+                        logInfo(`Created new chatId for session: ${effectiveChatId}`);
+                    }
                 }
             }
         }
@@ -846,8 +1010,10 @@ router.post('/v1/chat/completions', async (req, res) => {
 
                 // Setup streaming callback if stream=true
                 let streamingCallback = null;
+                let hasStreamedChunks = false;
                 if (stream) {
                     streamingCallback = (chunk) => {
+                        hasStreamedChunks = true;
                         // OpenWebUI не нуждается в role в чанках - только контент
                         writeSse({
                             id: 'chatcmpl-' + Date.now(),
@@ -861,11 +1027,25 @@ router.post('/v1/chat/completions', async (req, res) => {
                     };
                 }
                 
-                const result = await sendMessage(messageContent, mappedModel, qwenChatId, effectiveParentId, null, combinedTools, tool_choice, systemMessage, streamingCallback);
+                const result = await sendMessage(
+                    messageContent,
+                    mappedModel,
+                    qwenChatId,
+                    effectiveParentId,
+                    null,
+                    combinedTools,
+                    tool_choice,
+                    systemMessage,
+                    't2t',
+                    null,
+                    true,
+                    0,
+                    streamingCallback
+                );
 
                 // Сохраняем chatId в сессию для следующих запросов
                 if (!isMeta && result.chatId) {
-                    saveChatIdForSession(req, result.chatId, result.parentId);
+                    saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
                 }
 
                 if (result.error) {
@@ -878,7 +1058,7 @@ router.post('/v1/chat/completions', async (req, res) => {
                             { index: 0, delta: { content: `Error: ${result.error}` }, finish_reason: 'stop' }
                         ]
                     });
-                } else if (result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
+                } else if (!hasStreamedChunks && result.choices && result.choices[0] && result.choices[0].message && result.choices[0].message.content) {
                     // Qwen вернул JSON вместо SSE - отправляем контент одним чанком
                     const content = result.choices[0].message.content;
                     logDebug(`JSON response content length: ${content.length}`);
@@ -946,7 +1126,7 @@ router.post('/v1/chat/completions', async (req, res) => {
                     mapChatId(effectiveChatId, result.chatId);
                     logDebug(`Маппинг сохранён: ${effectiveChatId} -> ${result.chatId}`);
                 }
-                saveChatIdForSession(req, result.chatId, result.parentId);
+                saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
             }
 
             if (result.error) {
@@ -991,7 +1171,7 @@ router.post('/v1/chat/completions', async (req, res) => {
                 // Сохраняем chatId в сессии для последующих запросов от этого клиента
                 if (!isMeta) {
                     try {
-                        saveChatIdForSession(req, result.chatId, result.parentId || result.response_id);
+                        saveChatIdForSession(req, result.chatId, result.parentId || result.response_id, conversationScope);
                     } catch (e) {
                         logDebug(`Не удалось сохранить chatId в сессии: ${e.message}`);
                     }

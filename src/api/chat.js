@@ -358,7 +358,182 @@ function buildPayloadV2(messageContent, model, chatId, parentId, files, systemMe
     return payload;
 }
 
-async function executeApiRequest(page, apiUrl, payload, token) {
+function parseNonSseCompletionBody(body) {
+    try {
+        const parsed = JSON.parse(body);
+        const topLevelCode = parsed?.code;
+        const nestedCode = parsed?.data?.code;
+        const hasStructuredError =
+            parsed?.success === false ||
+            Boolean(parsed?.error) ||
+            Boolean(parsed?.data?.error) ||
+            Boolean(topLevelCode) ||
+            Boolean(nestedCode);
+
+        if (hasStructuredError) {
+            const isRateLimited = topLevelCode === 'RateLimited' || nestedCode === 'RateLimited';
+            return {
+                success: false,
+                status: isRateLimited ? 429 : 500,
+                errorBody: body
+            };
+        }
+
+        if (parsed.choices || parsed.id || (parsed.success === true && parsed.data)) {
+            return { success: true, isTask: false, data: parsed };
+        }
+    } catch {
+        // Ignore parse errors here and return a generic failure below.
+    }
+
+    return { success: false, error: 'Unexpected non-SSE 200 response', errorBody: body };
+}
+
+async function executeApiRequestWithNodeStreaming(apiUrl, payload, token, onChunk) {
+    try {
+        if (!token) return { success: false, error: 'Токен авторизации не найден' };
+        if (typeof fetch !== 'function') return { success: false, error: 'Fetch API is unavailable' };
+
+        const response = await fetch(apiUrl, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`,
+                'Accept': '*/*'
+            },
+            body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+            const errorBody = await response.text();
+            return { success: false, status: response.status, statusText: response.statusText, errorBody };
+        }
+
+        if (payload.stream === false) {
+            const jsonResponse = await response.json();
+            if (jsonResponse.code === 'RateLimited' || jsonResponse.error) {
+                return { success: false, status: 429, errorBody: JSON.stringify(jsonResponse) };
+            }
+            return { success: true, isTask: true, data: jsonResponse };
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        if (!contentType.includes('text/event-stream')) {
+            const body = await response.text();
+            return parseNonSseCompletionBody(body);
+        }
+
+        const reader = response.body?.getReader?.();
+        if (!reader) {
+            const body = await response.text();
+            return parseNonSseCompletionBody(body);
+        }
+
+        const decoder = new TextDecoder();
+        let buffer = '';
+        let fullContent = '';
+        let responseId = null;
+        let usage = null;
+        let finished = false;
+        let streamError = null;
+        let hasStreamedChunks = false;
+
+        while (!finished) {
+            const { done, value } = await reader.read();
+            if (done) break;
+
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
+
+            for (const rawLine of lines) {
+                const line = rawLine.trim();
+                if (!line || !line.startsWith('data:')) continue;
+
+                const jsonStr = line.substring(5).trim();
+                if (!jsonStr) continue;
+                if (jsonStr === '[DONE]') {
+                    finished = true;
+                    break;
+                }
+
+                try {
+                    const chunk = JSON.parse(jsonStr);
+
+                    if (chunk.code === 'RateLimited' || (chunk.code && chunk.detail)) {
+                        streamError = { status: 429, errorBody: JSON.stringify(chunk) };
+                        finished = true;
+                        break;
+                    }
+                    if (chunk.error && !chunk.choices) {
+                        streamError = { status: 500, errorBody: JSON.stringify(chunk) };
+                        finished = true;
+                        break;
+                    }
+
+                    if (chunk['response.created']) responseId = chunk['response.created'].response_id;
+                    if (chunk.response_id) responseId = chunk.response_id;
+
+                    if (chunk.choices && chunk.choices[0]) {
+                        const delta = chunk.choices[0].delta;
+                        if (delta && delta.content) {
+                            fullContent += delta.content;
+                            if (typeof onChunk === 'function') {
+                                onChunk(delta.content);
+                                hasStreamedChunks = true;
+                            }
+                        }
+                        if (delta && delta.status === 'finished') finished = true;
+                        if (chunk.choices[0].finish_reason) finished = true;
+                    }
+
+                    if (chunk.usage) usage = chunk.usage;
+                } catch {
+                    // Ignore broken chunks, keep reading stream.
+                }
+            }
+        }
+
+        if (streamError) {
+            return { success: false, ...streamError, hasStreamedChunks };
+        }
+
+        return {
+            success: true,
+            isTask: false,
+            hasStreamedChunks,
+            data: {
+                id: responseId || 'chatcmpl-' + Date.now(),
+                object: 'chat.completion',
+                created: Math.floor(Date.now() / 1000),
+                model: payload.model,
+                choices: [{ index: 0, message: { role: 'assistant', content: fullContent }, finish_reason: 'stop' }],
+                usage: usage || { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+                response_id: responseId
+            }
+        };
+    } catch (error) {
+        return { success: false, error: error.toString() };
+    }
+}
+
+async function executeApiRequest(page, apiUrl, payload, token, onChunk = null) {
+    if (payload?.stream !== false && typeof onChunk === 'function') {
+        const streamedResponse = await executeApiRequestWithNodeStreaming(apiUrl, payload, token, onChunk);
+
+        const canReturnDirectly =
+            streamedResponse.success ||
+            Boolean(streamedResponse.status) ||
+            Boolean(streamedResponse.errorBody) ||
+            streamedResponse.hasStreamedChunks === true;
+
+        if (canReturnDirectly) {
+            return streamedResponse;
+        }
+
+        logWarn(`Node-streaming недоступен (${streamedResponse.error || 'unknown error'}), fallback к browser fetch.`);
+    }
+
     const requestBody = { apiUrl, payload, token };
 
     logDebug(`Используем токен: ${token ? 'Токен существует' : 'Токен отсутствует'}`);
@@ -394,12 +569,26 @@ async function executeApiRequest(page, apiUrl, payload, token) {
                     const body = await response.text();
                     try {
                         const parsed = JSON.parse(body);
-                        // RateLimited или явная ошибка
-                        if (parsed.code === 'RateLimited' || parsed.error) {
-                            return { success: false, status: 429, errorBody: body };
+                        const topLevelCode = parsed?.code;
+                        const nestedCode = parsed?.data?.code;
+                        const hasStructuredError =
+                            parsed?.success === false ||
+                            Boolean(parsed?.error) ||
+                            Boolean(parsed?.data?.error) ||
+                            Boolean(topLevelCode) ||
+                            Boolean(nestedCode);
+
+                        // API иногда возвращает JSON с success=false и code при HTTP 200.
+                        if (hasStructuredError) {
+                            const isRateLimited = topLevelCode === 'RateLimited' || nestedCode === 'RateLimited';
+                            return {
+                                success: false,
+                                status: isRateLimited ? 429 : 500,
+                                errorBody: body
+                            };
                         }
                         // Валидный JSON-ответ completion (иногда Qwen возвращает так)
-                        if (parsed.choices || parsed.data || parsed.id) {
+                        if (parsed.choices || parsed.id || (parsed.success === true && parsed.data)) {
                             return { success: true, isTask: false, data: parsed };
                         }
                     } catch { /* not JSON, treat as unexpected */ }
@@ -478,7 +667,7 @@ async function executeApiRequest(page, apiUrl, payload, token) {
     }, requestBody);
 }
 
-async function handleApiError(response, tokenObj, message, model, chatId, parentId, files, retryCount, chatType, size, waitForCompletion) {
+async function handleApiError(response, tokenObj, message, model, chatId, parentId, files, retryCount, chatType, size, waitForCompletion, onChunk = null) {
     logRaw(JSON.stringify(response));
     logError(`Ошибка при получении ответа: ${response.error || response.statusText}`);
     if (response.errorBody) logDebug(`Тело ответа с ошибкой: ${response.errorBody}`);
@@ -503,7 +692,7 @@ async function handleApiError(response, tokenObj, message, model, chatId, parent
         }
         const { hasValidTokens } = await import('./tokenManager.js');
         if (hasValidTokens() && retryCount < MAX_RETRY_COUNT) {
-            return sendMessage(message, model, chatId, parentId, files, null, null, null, chatType, size, waitForCompletion, retryCount + 1);
+            return sendMessage(message, model, chatId, parentId, files, null, null, null, chatType, size, waitForCompletion, retryCount + 1, onChunk);
         }
         logError('Не осталось валидных токенов или исчерпаны попытки.');
         return { error: 'Все токены недействительны (401). Требуется повторная авторизация.', chatId };
@@ -527,7 +716,7 @@ async function handleApiError(response, tokenObj, message, model, chatId, parent
         authToken = null;
         const { hasValidTokens } = await import('./tokenManager.js');
         if (hasValidTokens() && retryCount < MAX_RETRY_COUNT) {
-            return sendMessage(message, model, chatId, parentId, files, null, null, null, chatType, size, waitForCompletion, retryCount + 1);
+            return sendMessage(message, model, chatId, parentId, files, null, null, null, chatType, size, waitForCompletion, retryCount + 1, onChunk);
         }
         return { error: `Все токены заблокированы по лимиту (${hours}ч)`, chatId };
     }
@@ -595,7 +784,7 @@ export async function sendMessage(message, model = DEFAULT_MODEL, chatId = null,
         logDebug(`Отправка сообщения в чат ${chatId} с parent_id: ${parentId || 'null'}`);
 
         const apiUrl = `${CHAT_API_URL}?chat_id=${chatId}`;
-        const response = await executeApiRequest(page, apiUrl, payload, authToken);
+        const response = await executeApiRequest(page, apiUrl, payload, authToken, onChunk);
 
         if (response.success && response.isTask) {
             logInfo('Обнаружен ответ с задачей (видеогенерация)');
@@ -670,15 +859,15 @@ export async function sendMessage(message, model = DEFAULT_MODEL, chatId = null,
             response.data.parentId = response.data.response_id;
             response.data.id = response.data.id || 'chatcmpl-' + Date.now();
             
-            // Если есть onChunk и контент - отправляем через него
-            if (typeof onChunk === 'function' && response.data.choices?.[0]?.message?.content) {
+            // Fallback: если поток чанков не был отдан, отправляем контент единым куском.
+            if (typeof onChunk === 'function' && response.data.choices?.[0]?.message?.content && !response.hasStreamedChunks) {
                 onChunk(response.data.choices[0].message.content);
             }
             
             return response.data;
         }
 
-        return handleApiError(response, tokenObj, message, model, chatId, parentId, files, retryCount, chatType, size, waitForCompletion);
+        return handleApiError(response, tokenObj, message, model, chatId, parentId, files, retryCount, chatType, size, waitForCompletion, onChunk);
     } catch (error) {
         logError('Ошибка при отправке сообщения', error);
         return { error: error.toString(), chatId };
