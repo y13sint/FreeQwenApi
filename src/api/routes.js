@@ -724,6 +724,7 @@ router.post('/chat/completions', async (req, res) => {
         }
 
         const messageContent = lastUserMessage.content;
+        const files = lastUserMessage.files || []; // ← ИЗВЛЕКАЕМ FILES
 
         if (isMeta) {
             effectiveChatId = null;
@@ -790,7 +791,7 @@ router.post('/chat/completions', async (req, res) => {
                     mappedModel,
                     qwenChatId,
                     effectiveParentId,
-                    null,
+                    files // ← ПЕРЕДАЁМ FILES,
                     combinedTools,
                     tool_choice,
                     systemMessage,
@@ -998,6 +999,7 @@ router.post('/v1/chat/completions', async (req, res) => {
         }
 
         const messageContent = lastUserMessage.content;
+        const files = lastUserMessage.files || []; // ← ИЗВЛЕКАЕМ FILES
 
         if (isMeta) {
             effectiveChatId = null;
@@ -1062,7 +1064,7 @@ router.post('/v1/chat/completions', async (req, res) => {
                     mappedModel,
                     qwenChatId,
                     effectiveParentId,
-                    null,
+                    files, // ← ИЗВЛЕКАЕМ FILES
                     combinedTools,
                     tool_choice,
                     systemMessage,
@@ -1130,7 +1132,7 @@ router.post('/v1/chat/completions', async (req, res) => {
             const combinedTools = tools || (functions ? functions.map(fn => ({ type: 'function', function: fn })) : null);
             const qwenChatId = await resolveQwenChatId(effectiveChatId, mappedModel);
 
-            const result = await sendMessage(messageContent, mappedModel, qwenChatId, effectiveParentId, null, combinedTools, tool_choice, systemMessage);
+            const result = await sendMessage(messageContent, mappedModel, qwenChatId, effectiveParentId, files, combinedTools, tool_choice, systemMessage);
 
             // Сохраняем chatId в сессии для следующих запросов
             if (!isMeta && result.chatId) {
