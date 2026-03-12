@@ -313,7 +313,29 @@ function parseOpenAIMessages(messages) {
     const systemMsg = messages.find(msg => msg.role === 'system');
     const systemMessage = systemMsg ? systemMsg.content : null;
     const lastUserMessage = messages.filter(msg => msg.role === 'user').pop();
-    const messageContent = lastUserMessage ? lastUserMessage.content : null;
+    
+    if (!lastUserMessage) {
+        return { messageContent: null, systemMessage };
+    }
+    
+    let messageContent = lastUserMessage.content;
+    
+    // Преобразуем OpenAI format content array во внутренний формат
+    if (Array.isArray(messageContent)) {
+        messageContent = messageContent.map(item => {
+            if (item.type === 'text') {
+                return { type: 'text', text: item.text };
+            } else if (item.type === 'image_url' && item.image_url) {
+                // OpenAI format: image_url: { url: '...' }
+                return { type: 'image', image: item.image_url.url };
+            } else if (item.type === 'image') {
+                // Уже во внутреннем формате
+                return { type: 'image', image: item.image };
+            }
+            return item;
+        });
+    }
+    
     return { messageContent, systemMessage };
 }
 
@@ -723,7 +745,24 @@ router.post('/chat/completions', async (req, res) => {
             return res.status(400).json({ error: 'В запросе нет сообщений от пользователя' });
         }
 
-        const messageContent = lastUserMessage.content;
+        let messageContent = lastUserMessage.content;
+        
+        // Преобразуем OpenAI format content array во внутренний формат
+        if (Array.isArray(messageContent)) {
+            messageContent = messageContent.map(item => {
+                if (item.type === 'text') {
+                    return { type: 'text', text: item.text };
+                } else if (item.type === 'image_url' && item.image_url) {
+                    // OpenAI format: image_url: { url: '...' }
+                    return { type: 'image', image: item.image_url.url };
+                } else if (item.type === 'image') {
+                    // Уже во внутреннем формате
+                    return { type: 'image', image: item.image };
+                }
+                return item;
+            });
+        }
+        
         const files = lastUserMessage.files || []; // ← ИЗВЛЕКАЕМ FILES
 
         if (isMeta) {
@@ -791,7 +830,7 @@ router.post('/chat/completions', async (req, res) => {
                     mappedModel,
                     qwenChatId,
                     effectiveParentId,
-                    files // ← ПЕРЕДАЁМ FILES,
+                    files, // ← ПЕРЕДАЁМ FILES
                     combinedTools,
                     tool_choice,
                     systemMessage,
@@ -998,7 +1037,24 @@ router.post('/v1/chat/completions', async (req, res) => {
             return res.status(400).json({ error: 'В запросе нет сообщений от пользователя' });
         }
 
-        const messageContent = lastUserMessage.content;
+        let messageContent = lastUserMessage.content;
+        
+        // Преобразуем OpenAI format content array во внутренний формат
+        if (Array.isArray(messageContent)) {
+            messageContent = messageContent.map(item => {
+                if (item.type === 'text') {
+                    return { type: 'text', text: item.text };
+                } else if (item.type === 'image_url' && item.image_url) {
+                    // OpenAI format: image_url: { url: '...' }
+                    return { type: 'image', image: item.image_url.url };
+                } else if (item.type === 'image') {
+                    // Уже во внутреннем формате
+                    return { type: 'image', image: item.image };
+                }
+                return item;
+            });
+        }
+        
         const files = lastUserMessage.files || []; // ← ИЗВЛЕКАЕМ FILES
 
         if (isMeta) {
