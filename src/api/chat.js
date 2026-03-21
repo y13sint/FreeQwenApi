@@ -31,11 +31,32 @@ const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 // ─── Page helpers ────────────────────────────────────────────────────────────
 
 async function getPage(context) {
-    if (context && typeof context.goto === 'function') {
-        return context;
-    } else if (context && typeof context.newPage === 'function') {
+    if (context && typeof context.newPage === 'function') {
         return await context.newPage();
     }
+
+    if (context && typeof context.goto === 'function') {
+        // Если передана Puppeteer Page, не переиспользуем её как рабочую:
+        // создаём отдельную вкладку из того же браузера, чтобы избежать гонок
+        // и случайного закрытия базовой страницы.
+        if (typeof context.browser === 'function') {
+            try {
+                const browser = context.browser();
+                if (browser && typeof browser.newPage === 'function') {
+                    return await browser.newPage();
+                }
+            } catch (error) {
+                logWarn(`Не удалось создать новую страницу из текущего контекста: ${error.message}`);
+            }
+        }
+
+        if (typeof context.isClosed === 'function' && context.isClosed()) {
+            throw new Error('Базовая страница браузера закрыта');
+        }
+
+        return context;
+    }
+
     throw new Error('Неверный контекст: не страница Puppeteer, не контекст Playwright');
 }
 
@@ -44,9 +65,14 @@ export const pagePool = {
     maxSize: PAGE_POOL_SIZE,
 
     async getPage(context) {
+        const baseContext = getBrowserContext();
         while (this.pages.length > 0) {
             const page = this.pages.pop();
             try {
+                if (page === baseContext) {
+                    logWarn('Базовая страница не должна быть в пуле, пропускаем');
+                    continue;
+                }
                 if (page.isClosed()) {
                     logWarn('Страница из пула закрыта, пропускаем');
                     continue;
@@ -55,7 +81,9 @@ export const pagePool = {
                 return page;
             } catch (e) {
                 logWarn(`Страница из пула протухла (${e.message?.substring(0, 60)}), создаём новую`);
-                try { await page.close(); } catch { /* already dead */ }
+                if (page !== baseContext) {
+                    try { await page.close(); } catch { /* already dead */ }
+                }
             }
         }
 
@@ -82,6 +110,12 @@ export const pagePool = {
             if (page.isClosed()) return;
         } catch { return; }
 
+        const baseContext = getBrowserContext();
+        if (page === baseContext) {
+            // Базовую страницу держим отдельно от пула.
+            return;
+        }
+
         if (this.pages.length < this.maxSize) {
             this.pages.push(page);
         } else {
@@ -90,7 +124,9 @@ export const pagePool = {
     },
 
     async clear() {
+        const baseContext = getBrowserContext();
         for (const page of this.pages) {
+            if (page === baseContext) continue;
             try { await page.close(); } catch (e) {
                 logError('Ошибка при закрытии страницы в пуле', e);
             }
@@ -164,12 +200,13 @@ export async function extractAuthToken(context, forceRefresh = false) {
 
     try {
         const page = await getPage(context);
+        const shouldClosePage = page !== context;
         try {
             await page.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded', timeout: PAGE_TIMEOUT });
             await delay(RETRY_DELAY);
 
             const newToken = await page.evaluate(() => localStorage.getItem('token'));
-            if (typeof context.newPage === 'function') await page.close();
+            if (shouldClosePage) await page.close();
 
             if (newToken) {
                 authToken = newToken;
@@ -180,7 +217,7 @@ export async function extractAuthToken(context, forceRefresh = false) {
             logError('Токен авторизации не найден в браузере');
             return null;
         } catch (error) {
-            if (typeof context.newPage === 'function') await page.close().catch(() => {});
+            if (shouldClosePage) await page.close().catch(() => {});
             throw error;
         }
     } catch (error) {
@@ -873,11 +910,7 @@ export async function sendMessage(message, model = DEFAULT_MODEL, chatId = null,
         return { error: error.toString(), chatId };
     } finally {
         if (page) {
-            try {
-                if (typeof getBrowserContext()?.newPage === 'function') await page.close();
-            } catch (e) {
-                logError('Ошибка при закрытии страницы', e);
-            }
+            pagePool.releasePage(page);
         }
     }
 }
@@ -970,11 +1003,7 @@ export async function createChatV2(model = DEFAULT_MODEL, title = 'Новый ч
         return { error: error.toString() };
     } finally {
         if (page) {
-            try {
-                if (typeof getBrowserContext()?.newPage === 'function') await page.close();
-            } catch (e) {
-                logError('Ошибка при закрытии страницы', e);
-            }
+            pagePool.releasePage(page);
         }
     }
 }
@@ -986,8 +1015,10 @@ export async function testToken(token) {
     if (!browserContext) return 'ERROR';
 
     let page;
+    let shouldClosePage = false;
     try {
         page = await getPage(browserContext);
+        shouldClosePage = page !== browserContext;
         await page.goto(CHAT_PAGE_URL, { waitUntil: 'domcontentloaded' });
 
         const requestBody = {
@@ -1018,7 +1049,7 @@ export async function testToken(token) {
         return 'ERROR';
     } finally {
         if (page) {
-            try { if (typeof browserContext.newPage === 'function') await page.close(); } catch { }
+            try { if (shouldClosePage) await page.close(); } catch { }
         }
     }
 }
