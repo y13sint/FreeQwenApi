@@ -119,6 +119,51 @@ npm run test:video-polling
 2. Попробуйте различные модели (список доступен через `/api/models`)
 3. Экспериментируйте с разными форматами запросов
 
+## Примеры на Python
+
+Python-реализация прокси запускает сервер с теми же OpenAI-совместимыми эндпоинтами:
+- `POST /api/chat/completions`
+- `POST /api/v1/chat/completions`
+- `POST /api/chat`
+
+Запуск:
+```bash
+pip install -r requirements.txt
+python main.py
+```
+
+После запуска можно использовать те же curl/OpenAI SDK примеры из этого каталога, только направив `base_url` на `http://localhost:3264/api`.
+
+### Python OpenAI SDK примеры
+
+Установите зависимости:
+```bash
+pip install openai
+```
+
+Запуск:
+```bash
+python examples/python-sdk/simple.py
+python examples/python-sdk/streaming.py
+python examples/python-sdk/system_message.py
+python examples/python-sdk/image_analysis.py
+python examples/python-sdk/conversation.py
+python examples/python-sdk/openai_compatibility.py
+```
+
+### Python direct API примеры (httpx)
+
+Установите зависимости:
+```bash
+pip install httpx
+```
+
+Запуск:
+```bash
+python examples/python-direct/httpx_example.py
+python examples/python-direct/httpx_streaming.py
+```
+
 ## Работа с изображениями
 
 Для примеров с изображениями необходимо:
