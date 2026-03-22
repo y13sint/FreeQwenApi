@@ -45,19 +45,33 @@ curl http://localhost:3264/api/chat/completions \
 6. [Работа с контекстом (API v2)](#работа-с-контекстом-api-v2)
 7. [Работа с изображениями](#работа-с-изображениями)
 8. [OpenAI SDK](#openai-sdk)
-9. [Доступные модели](#доступные-модели)
-10. [Переменные окружения](#переменные-окружения)
-11. [Структура проекта](#структура-проекта)
+9. [Python](#python)
+10. [Доступные модели](#доступные-модели)
+11. [Переменные окружения](#переменные-окружения)
+12. [Структура проекта](#структура-проекта)
 
 ---
 
 ## Быстрый старт
 
 ```bash
+# Node.js (Основной)
 git clone <repo-url>
-cd AbuseQwenThroughtBrowserIEmulationXD
+cd FreeQwenApi
 npm install
 npm start
+
+# Python (Альтернативный)
+git clone <repo-url>
+cd FreeQwenApi
+python -m venv venv
+# Windows:
+# venv\Scripts\activate
+# Linux/macOS:
+# source venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+python main.py
 ```
 
 При первом запуске появится интерактивное меню:
@@ -1259,27 +1273,67 @@ const response = await client.chat.completions.create({
 });
 ```
 
-### Python (openai SDK)
+---
 
-```python
-from openai import OpenAI
+## Python (Альтернативная реализация)
 
-client = OpenAI(
-    base_url="http://localhost:3264/api",
-    api_key="any-string",
-)
+Проект также включает полную реализацию на Python, которая работает независимо от Node.js.
 
-response = client.chat.completions.create(
-    model="qwen-max-latest",
-    messages=[
-        {"role": "user", "content": "Привет! Расскажи о себе."}
-    ],
-)
-
-print(response.choices[0].message.content)
+### Установка и запуск
+```bash
+python -m venv venv
+# Windows:
+# venv\Scripts\activate
+# Linux/macOS:
+# source venv/bin/activate
+pip install -r requirements.txt
+playwright install chromium
+python main.py
 ```
 
-> Больше примеров -- в директории `examples/`.
+### Возможности Python-версии
+*   **main.py**: Полноценный прокси-сервер на FastAPI и менеджер аккаунтов.
+*   **Интерактивное меню**: Тот же интерфейс, что и в Node.js версии.
+*   **Playwright**: Автоматизация браузера для входа и получения токенов.
+*   **OpenAI Compatibility**: Полная поддержка OpenAI SDK (`baseURL: http://localhost:3264/api`).
+
+### Python примеры (как в Node.js)
+
+В проект добавлены отдельные Python-примеры, аналогичные Node.js примерам:
+
+- OpenAI SDK: `examples/python-sdk/`
+- Прямые HTTP запросы: `examples/python-direct/`
+
+Установка зависимостей для примеров:
+
+```bash
+python -m venv venv
+# Windows:
+# venv\Scripts\activate
+# Linux/macOS:
+# source venv/bin/activate
+pip install -r requirements.txt
+```
+
+OpenAI SDK примеры:
+
+```bash
+python examples/python-sdk/simple.py
+python examples/python-sdk/streaming.py
+python examples/python-sdk/system_message.py
+python examples/python-sdk/image_analysis.py
+python examples/python-sdk/conversation.py
+python examples/python-sdk/openai_compatibility.py
+```
+
+Direct API примеры:
+
+```bash
+python examples/python-direct/httpx_example.py
+python examples/python-direct/httpx_streaming.py
+```
+
+> Перед запуском примеров убедитесь, что сервер уже запущен на `http://localhost:3264`.
 
 ---
 
@@ -1408,6 +1462,8 @@ print(response.choices[0].message.content)
 ## Структура проекта
 
 ```
+├── main.py                     # Python FastAPI реализация прокси + интерактивное меню
+├── requirements.txt            # Python зависимости
 ├── index.js                    # Точка входа: Express-сервер, меню аккаунтов
 ├── package.json
 ├── Dockerfile
@@ -1444,7 +1500,9 @@ print(response.choices[0].message.content)
 ├── examples/                   # Примеры использования API
 │   ├── openai-sdk/             # Примеры с OpenAI SDK
 │   ├── direct-api/             # Примеры с fetch/axios
-│   └── file-upload/            # Пример загрузки файлов
+│   ├── file-upload/            # Пример загрузки файлов
+│   ├── python-sdk/             # Python примеры с OpenAI SDK
+│   └── python-direct/          # Python примеры с httpx
 │
 ├── session/                    # Данные сессий и аккаунтов (создаётся автоматически)
 ├── logs/                       # Файлы логов (создаётся автоматически)
