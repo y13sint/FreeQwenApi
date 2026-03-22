@@ -1,6 +1,13 @@
 // config.js — Единый источник конфигурации проекта.
 // Все значения читаются из env-переменных с фоллбэками на дефолты.
 
+function toBoolean(value) {
+    if (typeof value === 'boolean') return value;
+    if (typeof value === 'number') return value === 1;
+    if (typeof value !== 'string') return false;
+    return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
 // ─── API URLs ────────────────────────────────────────────────────────────────
 const QWEN_BASE_URL = process.env.QWEN_BASE_URL || 'https://chat.qwen.ai';
 
@@ -42,6 +49,7 @@ export const USER_AGENT = process.env.USER_AGENT || 'Mozilla/5.0 (Windows NT 10.
 export const PORT = Number(process.env.PORT) || 3264;
 export const HOST = process.env.HOST || '0.0.0.0';
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'qwen-max-latest';
+export const ALLOW_UNSCOPED_SESSION_CHAT_RESTORE = toBoolean(process.env.ALLOW_UNSCOPED_SESSION_CHAT_RESTORE);
 
 // ─── Логирование ─────────────────────────────────────────────────────────────
 export const LOG_LEVEL = process.env.LOG_LEVEL || 'info';

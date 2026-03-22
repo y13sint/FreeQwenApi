@@ -7,7 +7,7 @@ import { getMappedModel } from './modelMapping.js';
 import { getStsToken, uploadFileToQwen } from './fileUpload.js';
 import { loadHistory, saveHistory } from './chatHistory.js';
 import { generateImage, getAvailableImageModels, checkImageApiAvailability } from './imageGeneration.js';
-import { MAX_FILE_SIZE, UPLOADS_DIR, DEFAULT_MODEL, STREAMING_CHUNK_DELAY } from '../config.js';
+import { MAX_FILE_SIZE, UPLOADS_DIR, DEFAULT_MODEL, STREAMING_CHUNK_DELAY, ALLOW_UNSCOPED_SESSION_CHAT_RESTORE } from '../config.js';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -141,6 +141,11 @@ function shouldForceNewChat(req) {
     ].some(isTruthyFlag);
 }
 
+function shouldPersistSessionContext(scope = null) {
+    const normalizedScope = normalizeIdValue(scope);
+    return Boolean(normalizedScope) || ALLOW_UNSCOPED_SESSION_CHAT_RESTORE;
+}
+
 // Глобальное хранилище для маппинга между сгенерированными ID и реальными Qwen chatId
 const chatIdMap = new Map();
 
@@ -206,7 +211,9 @@ function isOpenWebUiMetaRequest(messages) {
 // ============================================
 // СЕССИОННАЯ СИСТЕМА ДЛЯ ОТСЛЕЖИВАНИЯ ЧАТОВ
 // ============================================
-// Отслеживаем последний chatId для каждой сессии (по IP + User-Agent)
+// Scoped-сессии (по conversation_id/chat_id) включены всегда.
+// Unscoped fallback по IP + User-Agent работает только в legacy-режиме
+// через ALLOW_UNSCOPED_SESSION_CHAT_RESTORE=true.
 const sessionToChatMap = new Map(); // session-key -> {chatId, parentId, timestamp}
 
 function getSessionKey(req) {
@@ -715,7 +722,7 @@ router.post('/chat/completions', async (req, res) => {
                     effectiveChatId = buildInternalChatIdFromHint(conversationHint);
                     logInfo(`Using client conversation-id key: ${effectiveChatId}`);
                 }
-            } else {
+            } else if (ALLOW_UNSCOPED_SESSION_CHAT_RESTORE) {
                 const savedSession = forceNewChat ? null : getSavedChatId(req);
                 if (savedSession?.chatId) {
                     effectiveChatId = savedSession.chatId;
@@ -732,6 +739,8 @@ router.post('/chat/completions', async (req, res) => {
                         logInfo(`Created new chatId for session: ${effectiveChatId}`);
                     }
                 }
+            } else {
+                logDebug('chatId/conversation_id не переданы, unscoped session fallback отключён');
             }
         }
 
@@ -848,7 +857,9 @@ router.post('/chat/completions', async (req, res) => {
                         mapChatId(effectiveChatId, result.chatId);
                         logDebug(`Маппинг сохранён: ${effectiveChatId} -> ${result.chatId}`);
                     }
-                    saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
+                    if (shouldPersistSessionContext(conversationScope)) {
+                        saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
+                    }
                 }
 
                 if (result.error) {
@@ -910,7 +921,9 @@ router.post('/chat/completions', async (req, res) => {
                     mapChatId(effectiveChatId, result.chatId);
                     logDebug(`Маппинг сохранён: ${effectiveChatId} -> ${result.chatId}`);
                 }
-                saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
+                if (shouldPersistSessionContext(conversationScope)) {
+                    saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
+                }
             }
 
             if (result.error) {
@@ -1007,7 +1020,7 @@ router.post('/v1/chat/completions', async (req, res) => {
                     effectiveChatId = buildInternalChatIdFromHint(conversationHint);
                     logInfo(`Using client conversation-id key: ${effectiveChatId}`);
                 }
-            } else {
+            } else if (ALLOW_UNSCOPED_SESSION_CHAT_RESTORE) {
                 const savedSession = forceNewChat ? null : getSavedChatId(req);
                 if (savedSession?.chatId) {
                     effectiveChatId = savedSession.chatId;
@@ -1024,6 +1037,8 @@ router.post('/v1/chat/completions', async (req, res) => {
                         logInfo(`Created new chatId for session: ${effectiveChatId}`);
                     }
                 }
+            } else {
+                logDebug('chatId/conversation_id не переданы, unscoped session fallback отключён');
             }
         }
 
@@ -1133,7 +1148,9 @@ router.post('/v1/chat/completions', async (req, res) => {
 
                 // Сохраняем chatId в сессию для следующих запросов
                 if (!isMeta && result.chatId) {
-                    saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
+                    if (shouldPersistSessionContext(conversationScope)) {
+                        saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
+                    }
                 }
 
                 if (result.error) {
@@ -1197,7 +1214,9 @@ router.post('/v1/chat/completions', async (req, res) => {
                     mapChatId(effectiveChatId, result.chatId);
                     logDebug(`Маппинг сохранён: ${effectiveChatId} -> ${result.chatId}`);
                 }
-                saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
+                if (shouldPersistSessionContext(conversationScope)) {
+                    saveChatIdForSession(req, result.chatId, result.parentId, conversationScope);
+                }
             }
 
             if (result.error) {
@@ -1242,7 +1261,9 @@ router.post('/v1/chat/completions', async (req, res) => {
                 // Сохраняем chatId в сессии для последующих запросов от этого клиента
                 if (!isMeta) {
                     try {
-                        saveChatIdForSession(req, result.chatId, result.parentId || result.response_id, conversationScope);
+                        if (shouldPersistSessionContext(conversationScope)) {
+                            saveChatIdForSession(req, result.chatId, result.parentId || result.response_id, conversationScope);
+                        }
                     } catch (e) {
                         logDebug(`Не удалось сохранить chatId в сессии: ${e.message}`);
                     }
