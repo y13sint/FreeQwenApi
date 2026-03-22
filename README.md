@@ -733,17 +733,21 @@ POST /api/chat/completions
 
 ### Behavior
 
-1. **No forced new chat per request:** if `chatId` is omitted, the proxy first tries to restore chat context from the session (IP + User-Agent) or by `conversation_id`, and only then creates a new chat.
+1. **Isolated by default:** if `chatId` is omitted and `conversation_id` is not provided, the proxy does not restore global session context (IP + User-Agent), so chats do not leak into each other.
 
-2. **Both id formats are supported:** `chatId`/`parentId` and `chat_id`/`parent_id`.
+2. **Conversation-aware routing:** if `conversation_id`/`chat_id` is provided, the proxy keeps context inside that scoped conversation.
 
-3. **Force a fresh chat:** send `newChat: true` or `new_chat: true`.
+3. **Legacy global restore is optional:** set `ALLOW_UNSCOPED_SESSION_CHAT_RESTORE=true` to return to old behavior (restore by IP + User-Agent when ids are omitted).
 
-4. **System messages are supported:** `role: "system"` is passed through to the upstream model.
+4. **Both id formats are supported:** `chatId`/`parentId` and `chat_id`/`parent_id`.
 
-5. **Strict JSON parsing:** invalid JSON (for example, single quotes instead of double quotes) returns `400 Invalid JSON`.
+5. **Force a fresh chat:** send `newChat: true` or `new_chat: true`.
 
-6. **Method check:** `GET /api/chat/completions` returns `405`; use `POST`.
+6. **System messages are supported:** `role: "system"` is passed through to the upstream model.
+
+7. **Strict JSON parsing:** invalid JSON (for example, single quotes instead of double quotes) returns `400 Invalid JSON`.
+
+8. **Method check:** `GET /api/chat/completions` returns `405`; use `POST`.
 
 **System message request example:**
 
@@ -821,16 +825,18 @@ POST /api/chat/completions
 }
 ```
 
-3. **Автоматическое сохранение контекста:** Прокси автоматически сохраняет `chatId` и `parentId` в сессии (на основе IP + User-Agent), поэтому OpenWebUI может продолжать диалог без явной передачи этих параметров.
+3. **Изоляция чатов по умолчанию:** без `conversation_id`/`chatId` прокси не восстанавливает общий контекст по IP + User-Agent, чтобы исключить «память» между разными чатами.
 
-4. **Детерминированные chatId:** Для каждого уникального первого сообщения пользователя генерируется стабильный `chatId`, что позволяет OpenWebUI корректно управлять историей диалогов.
+4. **Scoped-контекст для OpenWebUI:** если OpenWebUI передаёт `conversation_id` (или `chat_id`), контекст продолжается внутри этого конкретного диалога.
 
-5. **Поддержка всех эндпоинтов:**
+5. **Legacy fallback при необходимости:** можно вернуть старое поведение через `ALLOW_UNSCOPED_SESSION_CHAT_RESTORE=true`.
+
+6. **Поддержка всех эндпоинтов:**
    - `/api/chat/completions` — OpenAI-совместимый эндпоинт
    - `/api/v1/chat/completions` — альтернативный OpenAI-совместимый эндпоинт
    - `/api/chat` — нативный эндпоинт прокси
 
-6. **Генерация изображений:** Через OpenWebUI можно использовать генерацию изображений через эндпоинт `/api/images/generations` (DALL-E-совместимый API).
+7. **Генерация изображений:** Через OpenWebUI можно использовать генерацию изображений через эндпоинт `/api/images/generations` (DALL-E-совместимый API).
 
 ---
 
@@ -1334,6 +1340,7 @@ print(response.choices[0].message.content)
 | `PORT` | `3264` | Порт HTTP-сервера |
 | `HOST` | `0.0.0.0` | Адрес привязки |
 | `DEFAULT_MODEL` | `qwen-max-latest` | Модель, используемая если не указана в запросе |
+| `ALLOW_UNSCOPED_SESSION_CHAT_RESTORE` | `false` | Разрешить legacy-восстановление контекста по IP + User-Agent, даже без `conversation_id`/`chatId` |
 
 ### Режимы запуска
 
