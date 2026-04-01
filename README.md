@@ -56,13 +56,13 @@ curl http://localhost:3264/api/chat/completions \
 
 ```bash
 # Node.js (Основной)
-git clone <repo-url>
+git clone https://github.com/y13sint/FreeQwenApi
 cd FreeQwenApi
 npm install
 npm start
 
 # Python (Альтернативный)
-git clone <repo-url>
+git clone https://github.com/y13sint/FreeQwenApi
 cd FreeQwenApi
 python -m venv venv
 # Windows:
