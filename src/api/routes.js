@@ -1,5 +1,5 @@
 import express from 'express';
-import { sendMessage, getAllModels, getApiKeys, createChatV2, pollQwenTaskStatus, extractMediaUrl, pagePool, extractAuthToken } from './chat.js';
+import { sendMessage, getAllModels, getApiKeys, createChatV2, pollQwenTaskStatus, extractMediaUrl, pagePool, extractAuthToken, deleteChatV2 } from './chat.js';
 import { getAuthenticationStatus, getBrowserContext } from '../browser/browser.js';
 import { checkAuthentication } from '../browser/auth.js';
 import { logInfo, logError, logDebug, logWarn } from '../logger/index.js';
@@ -7,7 +7,7 @@ import { getMappedModel } from './modelMapping.js';
 import { getStsToken, uploadFileToQwen } from './fileUpload.js';
 import { loadHistory, saveHistory } from './chatHistory.js';
 import { generateImage, getAvailableImageModels, checkImageApiAvailability } from './imageGeneration.js';
-import { MAX_FILE_SIZE, UPLOADS_DIR, DEFAULT_MODEL, STREAMING_CHUNK_DELAY, ALLOW_UNSCOPED_SESSION_CHAT_RESTORE } from '../config.js';
+import { MAX_FILE_SIZE, UPLOADS_DIR, DEFAULT_MODEL, STREAMING_CHUNK_DELAY, ALLOW_UNSCOPED_SESSION_CHAT_RESTORE, AUTO_DELETE_CHATS, DELETE_FAILED_CHATS } from '../config.js';
 import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
@@ -216,6 +216,17 @@ function isOpenWebUiMetaRequest(messages) {
 // Unscoped fallback по IP + User-Agent работает только в legacy-режиме
 // через ALLOW_UNSCOPED_SESSION_CHAT_RESTORE=true.
 const sessionToChatMap = new Map(); // session-key -> {chatId, parentId, timestamp}
+
+// Одноразовые чаты (без conversation_id) убираем из истории Qwen:
+// неудачные/пустые — всегда (режим failed), успешные — только при AUTO_DELETE_CHATS=all.
+function cleanupEphemeralChat(result, effectiveChatId, isMeta) {
+    if (isMeta || effectiveChatId || !result?.chatId) return;
+
+    const failed = Boolean(result.error) || !Array.isArray(result.choices) || result.choices.length === 0;
+    if (!AUTO_DELETE_CHATS && !(DELETE_FAILED_CHATS && failed)) return;
+
+    deleteChatV2(result.chatId).catch(() => {});
+}
 
 function getSessionKey(req) {
     // Создаём уникальный ключ сессии на основе IP и User-Agent
@@ -1378,6 +1389,9 @@ router.post('/chat/completions', async (req, res) => {
                     streamingCallback
                 );
 
+                // Одноразовый чат: неудачный удаляем сразу, успешный — по флагу.
+                cleanupEphemeralChat(result, effectiveChatId, isMeta);
+
                 if (captureToolCalls) {
                     const toolCalls = parseToolCallJson(result?.choices?.[0]?.message?.content);
                     if (toolCalls && toolCalls.length > 0) {
@@ -1459,6 +1473,9 @@ router.post('/chat/completions', async (req, res) => {
         } else {
             const qwenChatId = await resolveQwenChatId(effectiveChatId, mappedModel);
             const result = await sendMessage(messageContent, mappedModel, qwenChatId, effectiveParentId, null, qwenTools, tool_choice, toolAwareSystemMessage);
+
+            // Одноразовый чат: неудачный удаляем сразу, успешный — по флагу.
+            cleanupEphemeralChat(result, effectiveChatId, isMeta);
 
             // Сохраняем chatId в сессию для следующих запросов
             if (!isMeta && result.chatId) {

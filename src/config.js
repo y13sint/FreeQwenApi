@@ -52,6 +52,13 @@ export const PORT = Number(process.env.PORT) || 3264;
 export const HOST = process.env.HOST || '0.0.0.0';
 export const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'qwen3.7-max';
 export const ALLOW_UNSCOPED_SESSION_CHAT_RESTORE = toBoolean(process.env.ALLOW_UNSCOPED_SESSION_CHAT_RESTORE);
+// Режим очистки истории Qwen для одноразовых чатов (без conversation_id):
+//   failed (по умолчанию) — удалять только пустые/неудачные чаты;
+//   all / 1 / true         — удалять все такие чаты;
+//   off / 0 / false        — не удалять ничего.
+const AUTO_DELETE_CHATS_MODE = (process.env.AUTO_DELETE_CHATS || 'failed').trim().toLowerCase();
+export const AUTO_DELETE_CHATS = ['1', 'true', 'yes', 'on', 'all'].includes(AUTO_DELETE_CHATS_MODE);
+export const DELETE_FAILED_CHATS = AUTO_DELETE_CHATS || !['0', 'false', 'off', 'no', 'none'].includes(AUTO_DELETE_CHATS_MODE);
 
 // ─── Логирование ─────────────────────────────────────────────────────────────
 export const LOG_LEVEL = process.env.LOG_LEVEL || 'info';

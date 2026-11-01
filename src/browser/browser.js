@@ -231,7 +231,13 @@ export async function restartBrowserInHeadlessMode() {
 export async function shutdownBrowser() {
     try {
         try { await clearPagePool(); } catch (e) { logError('Ошибка при очистке пула страниц', e); }
-        if (browserInstance) {
+
+        const cdpUrl = (process.env.QWEN_CDP_URL || '').trim();
+        if (browserInstance && cdpUrl) {
+            // В CDP-режиме browser.close() завершил бы сам Chrome пользователя —
+            // только отключаемся.
+            try { browserInstance.disconnect(); } catch (e) { logError('Ошибка при отключении от Chrome', e); }
+        } else if (browserInstance) {
             try {
                 const pages = await browserInstance.pages();
                 for (const page of pages) await page.close().catch(() => {});
@@ -244,6 +250,20 @@ export async function shutdownBrowser() {
     } catch (error) {
         logError('Ошибка при завершении работы браузера', error);
     }
+}
+
+// Проверяет, живо ли CDP-соединение с Chrome, и при необходимости
+// переподключается (например, после падения/перезапуска браузера).
+export async function ensureBrowserConnection() {
+    if (browserInstance && browserInstance.isConnected()) return true;
+
+    logWarn('Соединение с Chrome потеряно, переподключаемся...');
+    try { browserInstance?.disconnect?.(); } catch { /* already gone */ }
+    browserInstance = null;
+    browserContext = null;
+    try { await clearPagePool(); } catch { /* pages are dead anyway */ }
+
+    return await initBrowser(false, true);
 }
 
 export function getBrowserContext() { return browserContext; }
